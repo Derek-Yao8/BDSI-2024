@@ -1,0 +1,308 @@
+Reading lung cancer data:
+```{r}
+library(survival)
+library(ranger)
+library(ggplot2)
+library(dplyr)
+library(ggfortify)
+library(survminer)
+library(glmnet)
+library(tidyr)
+library(rjags)
+library(afthd)
+library(penAFT)
+
+#Load lung meta data
+lungMeta<-read.csv("/Users/derekyao/Documents/BDSI/Cancer Data Science/Data/newLungKData.csv")
+lungMeta
+
+#filter image with most cells per patient
+lungMeta
+modData <- lungMeta %>%
+  group_by(patient_id) %>%
+  slice(which.max(totalCell)) %>%
+  ungroup()
+
+#recode demographic variables
+#mhcII <- mchII_status
+# 0-low, 1-high
+
+#gender_1 <- gender
+# 0- male, 1- female
+
+
+modData1 <- modData %>%
+  mutate(mchII= case_when(mhcII_status=="low" ~ 0,
+                          mhcII_status=="high" ~ 1),
+         gender_1= case_when(gender=="F" ~ 0,
+                             gender=="M" ~ 1),
+         age_at_diagnosis = as.numeric(age_at_diagnosis), 
+         stage_new = case_when(stage_numeric==1 ~ "1",
+                               stage_numeric==2 ~ "2",
+                               stage_numeric==3 ~ "3_plus",
+                               stage_numeric==4 ~ "3_plus"))
+modData1$stage_new <- factor(modData1$stage_new, levels = c("1", "2", "3_plus"))
+class(modData1$stage_new)
+
+stage_dummies <- model.matrix(~ stage_new, data = modData1)[, -1]
+stage_dummies
+
+
+predictors <- modData1[, c("age_at_diagnosis", "gender_1", "p_Tumor", "p_Macrophage", "p_Cytotoxic_T", 
+                           "p_T_Helper", "p_B_Cell", "k_Tumor", "k_Cytotoxic_T", "k_B_Cell", "k_Macrophage", 
+                           "k_T_Helper", "k_Tumor_CytotoxicT", "k_Tumor_BCell", "k_Tumor_Macrophage", 
+                           "k_Tumor_THelper", "k_BCell_CytotoxicT", "k_BCell_Macrophage", "k_BCell_THelper", 
+                           "k_CytotoxicT_Macrophage", "k_CytotoxicT_THelper", "k_Macrophage_THelper")]
+
+# Combine predictors and dummy variables
+modData2 <- cbind(predictors, stage_dummies)
+names(modData2)
+
+filtered_modData_lung <- modData[complete.cases(modData %>%
+                                             select(p_Tumor,
+        p_Macrophage,
+        p_Cytotoxic_T,
+        p_T_Helper,
+        p_B_Cell,
+         k_Tumor,   
+         k_Cytotoxic_T,    
+        k_B_Cell,
+         k_Macrophage,
+         k_T_Helper,
+         k_Tumor_CytotoxicT,
+         k_Tumor_BCell, 
+         k_Tumor_Macrophage,
+         k_Tumor_THelper,
+         k_BCell_CytotoxicT,
+         k_BCell_Macrophage,
+         k_BCell_THelper,
+         k_CytotoxicT_Macrophage,
+         k_CytotoxicT_THelper,
+         k_Macrophage_THelper)), ] 
+```
+
+
+Kaplan-Meier Curves of lung Cytotoxic T cell clustering:
+```{r}
+median_Cytotoxic_T <- median(filtered_modData_lung$k_Cytotoxic_T)
+
+filtered_modData_lung_median_Cytotoxic_T <- filtered_modData_lung %>%
+  mutate(CytoTcell_group = case_when(
+    k_Cytotoxic_T < median_Cytotoxic_T ~ "Below Median",
+    k_Cytotoxic_T >= median_Cytotoxic_T ~ "Above Median",
+  ))
+
+km_fit_lung_median_Cytotoxic_T <- survfit(
+  Surv(survival_days, survival_status) ~ CytoTcell_group, data=filtered_modData_lung_median_Cytotoxic_T)
+
+lab_names_median <- c("Below Median (Low Clustering)", "Above Median (High Clustering)")
+
+library(RColorBrewer)
+display.brewer.all()
+
+kap_lung_median_Cytotoxic_T<-ggsurvplot(km_fit_lung_median_Cytotoxic_T, 
+                     size=1.5,
+                     palette = 'viridis',
+                     title = "Lung Cancer: Patient Survival by Cytotoxic T Cell Clustering", 
+                     risk.table =FALSE, 
+                   pval = TRUE,
+                   legend.title = "Cytotoxic T Cell Clustering",
+           legend.labs = lab_names_median, xlab = 'Time (days)', font.x = "bold",
+           font.y="bold",
+           font.title="bold", conf.int = TRUE)
+
+kap_lung_median_Cytotoxic_T
+```
+
+Kaplan-Meier Curves of lung B Cell clustering:
+```{r}
+median_BCell <- median(filtered_modData_lung$k_B_Cell)
+
+filtered_modData_lung_median_BCell <- filtered_modData_lung %>%
+  mutate(Bcell_group = case_when(
+    k_B_Cell < median_BCell ~ "Below Median",
+    k_B_Cell >= median_BCell ~ "Above Median",
+  ))
+
+km_fit_lung_median_BCell <- survfit(
+  Surv(survival_days, survival_status) ~ Bcell_group, data=filtered_modData_lung_median_BCell)
+
+lab_names_median <- c("Below Median (Low Clustering)", "Above Median (High Clustering)")
+
+library(RColorBrewer)
+display.brewer.all()
+
+kap_lung_median_BCell<-ggsurvplot(km_fit_lung_median_BCell, 
+                     size=1.5,
+                     palette = 'viridis',
+                     title = "Lung Cancer: Patient Survival by B Cell Clustering", 
+                     risk.table =FALSE, 
+                   pval = TRUE,
+                   legend.title = "B Cell Clustering",
+           legend.labs = lab_names_median, xlab = 'Time (days)', font.x = "bold",
+           font.y="bold",
+           font.title="bold", conf.int = TRUE)
+
+kap_lung_median_BCell
+```
+
+Kaplan-Meier Curves of lung T-Helper Cell clustering:
+```{r}
+median_T_Helper <- median(filtered_modData_lung$k_T_Helper)
+
+filtered_modData_lung_median_T_Helper <- filtered_modData_lung %>%
+  mutate(T_Helper_cell_group = case_when(
+    k_T_Helper < median_T_Helper ~ "Below Median",
+    k_T_Helper >= median_T_Helper ~ "Above Median",
+  ))
+
+km_fit_lung_median_T_Helper <- survfit(
+  Surv(survival_days, survival_status) ~ T_Helper_cell_group, data=filtered_modData_lung_median_T_Helper)
+
+lab_names_median <- c("Below Median (Low Clustering)", "Above Median (High Clustering)")
+
+library(RColorBrewer)
+display.brewer.all()
+
+kap_lung_median_T_Helper<-ggsurvplot(km_fit_lung_median_T_Helper, 
+                     size=1.5,
+                     palette = 'viridis',
+                     title = "Lung Cancer: Patient Survival by T Helper Cell Clustering", 
+                     risk.table =FALSE, 
+                   pval = TRUE,
+                   legend.title = "T Helper Cell Clustering",
+           legend.labs = lab_names_median, xlab = 'Time (days)', font.x = "bold",
+           font.y="bold",
+           font.title="bold", conf.int = TRUE)
+
+kap_lung_median_T_Helper
+```
+
+Kaplan-Meier Curves of lung B Cell and Cytotoxic T Cell colocalization:
+```{r}
+median_BCell_CytotoxicT <- median(filtered_modData_lung$k_BCell_CytotoxicT)
+
+filtered_modData_lung_median_BCell_CytotoxicT <- filtered_modData_lung %>%
+  mutate(B_CytoT_cell_group = case_when(
+    k_BCell_CytotoxicT < median_BCell_CytotoxicT ~ "Below Median",
+    k_BCell_CytotoxicT >= median_BCell_CytotoxicT ~ "Above Median",
+  ))
+
+km_fit_lung_median_BCell_CytotoxicT <- survfit(
+  Surv(survival_days, survival_status) ~ B_CytoT_cell_group, data=filtered_modData_lung_median_BCell_CytotoxicT)
+
+lab_names_median <- c("Below Median (Low Clustering)", "Above Median (High Clustering)")
+
+library(RColorBrewer)
+display.brewer.all()
+
+kap_lung_median_BCell_CytotoxicT <- ggsurvplot(km_fit_lung_median_BCell_CytotoxicT, 
+                     size=1.5,
+                     palette = 'viridis',
+                     title = "Lung Cancer: Patient Survival by B Cell and Cytotoxic T Cell Colocalization", 
+                     risk.table =FALSE, 
+                   pval = TRUE,
+                   legend.title = "B Cell and Cytotoxic T Cell Colocalization",
+           legend.labs = lab_names_median, xlab = 'Time (days)', font.x = "bold",
+           font.y="bold",
+           font.title="bold", conf.int = TRUE)
+
+kap_lung_median_BCell_CytotoxicT
+```
+
+Kaplan-Meier Curves of lung B Cell and T Helper Cell colocalization:
+```{r}
+median_BCell_THelper <- median(filtered_modData_lung$k_BCell_THelper)
+
+filtered_modData_lung_median_BCell_THelper <- filtered_modData_lung %>%
+  mutate(B_THelp_cell_group = case_when(
+    k_BCell_THelper < median_BCell_THelper ~ "Below Median",
+    k_BCell_THelper >= median_BCell_THelper ~ "Above Median",
+  ))
+
+km_fit_lung_median_BCell_THelper <- survfit(
+  Surv(survival_days, survival_status) ~ B_THelp_cell_group, data=filtered_modData_lung_median_BCell_THelper)
+
+lab_names_median <- c("Below Median (Low Clustering)", "Above Median (High Clustering)")
+
+library(RColorBrewer)
+display.brewer.all()
+
+kap_lung_median_BCell_THelper <- ggsurvplot(km_fit_lung_median_BCell_THelper, 
+                     size=1.5,
+                     palette = 'viridis',
+                     title = "Lung Cancer: Patient Survival by B Cell and T Helper Cell Colocalization", 
+                     risk.table =FALSE, 
+                   pval = TRUE,
+                   legend.title = "B Cell and T Helper Cell Colocalization",
+           legend.labs = lab_names_median, xlab = 'Time (days)', font.x = "bold",
+           font.y="bold",
+           font.title="bold", conf.int = TRUE)
+
+kap_lung_median_BCell_THelper
+```
+
+Kaplan-Meier curves of lung Cytotoxic T and T Helper cell colocalization:
+```{r}
+median_CytotoxicT_THelper <- median(filtered_modData_lung$k_CytotoxicT_THelper)
+
+filtered_modData_lung_median_CytotoxicT_THelper <- filtered_modData_lung %>%
+  mutate(CytoT_THelp_cell_group = case_when(
+    k_CytotoxicT_THelper < median_CytotoxicT_THelper ~ "Below Median",
+    k_CytotoxicT_THelper >= median_CytotoxicT_THelper ~ "Above Median",
+  ))
+
+km_fit_lung_median_CytotoxicT_THelper <- survfit(
+  Surv(survival_days, survival_status) ~ CytoT_THelp_cell_group, data=filtered_modData_lung_median_CytotoxicT_THelper)
+
+lab_names_median <- c("Below Median (Low Clustering)", "Above Median (High Clustering)")
+
+library(RColorBrewer)
+display.brewer.all()
+
+kap_lung_median_CytotoxicT_THelper <- ggsurvplot(km_fit_lung_median_CytotoxicT_THelper, 
+                     size=1.5,
+                     palette = 'viridis',
+                     title = "Lung Cancer: Patient Survival by Cytotoxic T Cell and T Helper Cell Colocalization", 
+                     risk.table =FALSE, 
+                   pval = TRUE,
+                   legend.title = "Cytotoxic T Cell and T Helper Colocalization",
+           legend.labs = lab_names_median, xlab = 'Time (days)', font.x = "bold",
+           font.y="bold",
+           font.title="bold", conf.int = TRUE)
+
+kap_lung_median_CytotoxicT_THelper
+```
+
+Kaplan-Meier Curves of Macrophage and T Helper Cell Colocalization:
+```{r}
+median_Macro_THelper <- median(filtered_modData_lung$k_Macrophage_THelper)
+
+filtered_modData_lung_median_Macro_THelper <- filtered_modData_lung %>%
+  mutate(Macro_THelp_cell_group = case_when(
+    k_Macrophage_THelper < median_Macro_THelper ~ "Below Median",
+    k_Macrophage_THelper >= median_Macro_THelper ~ "Above Median",
+  ))
+
+km_fit_lung_median_Macro_THelper <- survfit(
+  Surv(survival_days, survival_status) ~ Macro_THelp_cell_group, data=filtered_modData_lung_median_Macro_THelper)
+
+lab_names_median <- c("Below Median (Low Clustering)", "Above Median (High Clustering)")
+
+library(RColorBrewer)
+display.brewer.all()
+
+kap_lung_median_Macro_THelper <- ggsurvplot(km_fit_lung_median_Macro_THelper, 
+                     size=1.5,
+                     palette = 'viridis',
+                     title = "Lung Cancer: Survival by Macrophage and T Helper Cell", 
+                     risk.table =FALSE, 
+                   pval = TRUE,
+                   legend.title = "Macrophage and T Helper Cell Colocalization",
+           legend.labs = lab_names_median, xlab = 'Time (days)', font.x = "bold",
+           font.y="bold",
+           font.title="bold", conf.int = TRUE)
+
+kap_lung_median_Macro_THelper
+```
+

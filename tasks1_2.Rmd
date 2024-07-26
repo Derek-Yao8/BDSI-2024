@@ -1,0 +1,226 @@
+---
+title: "Tasks 1 and 2"
+author: "BDSI Cancer Data Science"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(forcats)
+#library(DIMPLE)
+```
+
+
+## Loading Data
+
+```{r}
+ovarianData <- readRDS(
+  "/Users/derekyao/Documents/BDSI/Cancer Data Science/Data/ovarianData.RDS"
+)
+lungData <- readRDS(
+  "/Users/derekyao/Documents/BDSI/Cancer Data Science/Data/lungData.RDS"
+)
+```
+
+## Descriptive Statistics
+
+How many patients are in the dataset?
+```{r}
+nrow(ovarianData$ovarian_metadata) # 128
+length(
+  unique(
+    ovarianData$ovarian_cells$sample_id
+  )
+) # 128
+
+length(unique(lungData$lung_metadata$patient_id)) # 153
+length(
+  unique(
+    lungData$lung_cells$slide_id
+  )
+) # 153
+```
+The lung data has 153 patients, while the ovarian data has 128 patients.
+
+How many ROIs are in the dataset per patient?
+
+```{r}
+mean(
+  unlist(
+    lungData$lung_cells %>% 
+    group_by(slide_id) %>% 
+    dplyr::summarize(ROIs = length(table(unique(image_id)))) %>% 
+    select(ROIs)
+  )
+) # 4.97 ROI per patient
+nrow(lungData$lung_metadata) # 761 regions
+table(
+  lungData$lung_cells %>% 
+  group_by(slide_id) %>% 
+  dplyr::summarize(ROIs = length(table(unique(image_id)))) %>% 
+  select(ROIs)
+)
+
+nrow(ovarianData$ovarian_metadata) # 128 regions, one per patient
+```
+The lung data has about five ROIs per patient, while the ovarian data has one
+ROI per patient (see associated paper/VectraPolaris documentation)
+
+Distribution of cells
+```{r}
+mean(
+  unlist(
+    lungData$lung_cells %>% 
+    group_by(image_id) %>% 
+    dplyr::summarize(cells = n()) %>% 
+    select(cells)
+  )
+) # ~2100
+hist(
+  unlist(
+    lungData$lung_cells %>% 
+    group_by(image_id) %>% 
+    dplyr::summarize(cells = n()) %>% 
+    select(cells)
+  )
+)
+summary(
+  unlist(
+    lungData$lung_cells %>% 
+    group_by(image_id) %>% 
+    dplyr::summarize(cells = n()) %>% 
+    select(cells)
+  )
+)
+# 500-5000 cells, mostly 1500-2500 based on IQR
+
+mean(
+  unlist(
+    ovarianData$ovarian_cells %>% 
+    group_by(sample_id) %>% 
+    dplyr::summarize(cells = n()) %>% 
+    select(cells)
+  )
+) # 12,137
+hist(
+  unlist(
+    ovarianData$ovarian_cells %>% 
+    group_by(sample_id) %>% 
+    dplyr::summarize(cells = n()) %>% 
+    select(cells)
+  )
+)
+summary(
+  unlist(
+    ovarianData$ovarian_cells %>% 
+    group_by(sample_id) %>% 
+    dplyr::summarize(cells = n()) %>% 
+    select(cells)
+  )
+)
+# 4500-25000, mostly 10,000-14,000 (IQR)
+```
+There are about 2100 cells per ROI in the lung data and 12,100 cells per ROI
+in the ovarian data.
+
+The ovarian data has many cells per ROI, with a long right tail in the distribution.
+The lung data has fewer cells per ROI, with some ROIs containing less than 1000 
+cells. The distribution is more symmetrical.
+
+What is the median survival time?
+```{r}
+# select first survival days so we have 153 observations (one per patient)
+# instead of 761 which repeatedly counts patients' survival times
+median(unlist(
+  lungData$lung_metadata %>% dplyr::group_by(patient_id) %>% dplyr::summarise(
+    survival_days = dplyr::first(survival_days)
+  ) %>% select(survival_days)
+))
+median(unlist(
+  lungData$lung_metadata %>% dplyr::group_by(patient_id) %>% dplyr::summarise(
+    survival_days = dplyr::first(survival_days)
+  ) %>% select(survival_days)
+))/365
+
+median(ovarianData$ovarian_metadata$survival_time)
+median(ovarianData$ovarian_metadata$survival_time)/12
+```
+In the lung dataset, median survival time is 2615 days, or 7.16 years. In the 
+ovarian dataset, median survival time is 52 months, or 4.33 years.
+
+How many cellular phenotypes are in the data?
+```{r}
+table(lungData$lung_cells$pheno)
+table(ovarianData$ovarian_cells$pheno)
+```
+There are six cellular phenotypes in the lung data: CD14, CD19, CD4, CD8, CK,
+and Other. There are also six phenotypes in the ovarian data: B Cells, 
+Cytotoxic T cells, Macrophages, Other, T Helper cells, and Tumor cells.
+
+## Data Visualizations
+
+Plot an ROI
+```{r}
+# lung
+ggplot(
+  lungData$lung_cells %>% filter(
+    image_id == unique(lungData$lung_cells$image_id)[1]
+  ),
+  aes(x,y, col = pheno, title = "Plot")
+) +
+  geom_point()
+  
+# ovarian
+ggplot(
+  ovarianData$ovarian_cells %>% filter(
+    sample_id == unique(ovarianData$ovarian_cells$sample_id)[1]
+  ),
+  aes(x,y, col = pheno)
+) +
+  geom_point()
+```
+
+Plot images "#30 2-556-915_[53231,13381].im3" and 
+"#30 2-556-915_[39807,17133].im3". Comment on any similarities/differences
+spatially and non-spatially.
+```{r}
+ggplot(
+  lungData$lung_cells %>% filter(
+    image_id == "#30 2-556-915_[53231,13381].im3"
+  ),
+  aes(x,y, col = pheno)
+) +
+  geom_point()
+ggplot(
+  lungData$lung_cells %>% filter(
+    image_id == "#30 2-556-915_[39807,17133].im3"
+  ),
+  aes(x,y, col = pheno)
+) +
+  geom_point()
+
+ggplot(
+  lungData$lung_cells %>% filter(
+    image_id == "#30 2-556-915_[39807,17133].im3"
+  ),
+  aes(x,y, col = pheno)
+) +
+  geom_point()
+
+```
+Image "#30 2-556-915_[53231,13381].im3" has a clear pattern of CK cells
+surrounding a blank area of the ROI. Aside from these CK cells, most cells
+in the image are classified as "other".
+
+Image "#30 2-556-915_[39807,17133].im3" has a clear cluster of CD4 cells
+in the image. Unlike the previous image, there does not appear to be a 
+pattern of blank area, and there are few CK cells.
+
+These images illustrate the variability in spatial patterns and phenotype 
+prevalence that can be present between images of the same patient.

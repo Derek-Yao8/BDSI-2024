@@ -1,0 +1,519 @@
+---
+title: "Ovarian Kaplan_Meier Curves"
+author: "Derek Yao"
+date: "2024-07-16"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(survival)
+library(ranger)
+library(ggplot2)
+library(dplyr)
+library(ggfortify)
+library(survminer)
+library(glmnet)
+library(tidyr)
+library(rjags)
+library(afthd)
+library(penAFT)
+
+
+###
+ovarian_dat_2<-read.csv("/Users/derekyao/Documents/BDSI/Cancer Data Science/Data/newOvKData.csv")
+
+names(ovarian_dat_2)
+```
+```{r}
+#define x values
+ovarian_k_2 <- ovarian_dat_2 %>%
+  select(age_at_diagnosis,
+         p_Tumor,
+         p_Cytotoxic_T,
+         p_Macrophage,
+         p_T_Helper,
+         k_Tumor,   
+         k_Cytotoxic_T,    
+         k_Macrophage,
+         k_T_Helper,
+         k_Tumor_CytotoxicT,
+         k_Tumor_Macrophage,
+         k_Tumor_THelper,
+         k_CytotoxicT_Macrophage,
+         k_CytotoxicT_THelper,
+         k_Macrophage_THelper,
+       ) %>%
+  filter(complete.cases(.))
+
+ovarian_k_2
+
+
+#remove rows from total data set
+filtered_modData_ovarian_2 <- ovarian_dat[complete.cases(ovarian_dat %>%
+                                             select(p_Tumor,
+                                                    p_Cytotoxic_T,
+                                                    p_Macrophage,
+                                                    p_T_Helper,
+                                                    k_Tumor,   
+                                                    k_Cytotoxic_T,    
+                                                    k_Macrophage,
+                                                    k_T_Helper,
+                                                    k_Tumor_CytotoxicT,
+                                                    k_Tumor_Macrophage,
+                                                    k_Tumor_THelper,
+                                                    k_CytotoxicT_Macrophage,
+                                                    k_CytotoxicT_THelper,
+                                                    k_Macrophage_THelper
+                                                  )), ] 
+
+```
+
+
+Kaplan-Meier Curve of Ovarian Cancer Data Set
+```{r}
+#Kaplan Meier Curve for ovarian by age groups young, middle, old
+km_fit_ov <- survfit(
+  Surv(survival_time, death) ~ 1, data=ovarian_dat_2)
+
+kap_ov<-ggsurvplot(km_fit_ov, 
+                     size=1.5,
+                     palette = "red",
+                     title = "Survival Curve for Ovarian Cancer Patients", 
+                     risk.table =T)
+
+kap_ov
+```
+
+Kaplan-Meier Curves of Ovarian data by Age Groups
+```{r}
+hist(filtered_modData_ovarian_2$age_at_diagnosis)
+
+ovarian_dat_2$age_at_diagnosis
+
+median_age <- median(filtered_modData_ovarian_2$age_at_diagnosis)
+
+filtered_modData_ovarian_2 <- filtered_modData_ovarian_2 %>%
+  mutate(age_group = case_when(
+    age_at_diagnosis < 50 ~ "<50",
+    age_at_diagnosis >= 50 & age_at_diagnosis <= 59 ~ "50-59",
+    age_at_diagnosis >= 60 & age_at_diagnosis <= 69 ~ "60-69",
+    age_at_diagnosis >= 70 ~ "70+",
+  ))
+
+filtered_modData_ovarian_2_median <- filtered_modData_ovarian_2 %>%
+  mutate(age_group = case_when(
+    age_at_diagnosis < median_age ~ "Below Median",
+    age_at_diagnosis >= median_age ~ "Above Median",
+  ))
+
+
+km_fit_ov <- survfit(
+  Surv(survival_time, death) ~ age_group, data=filtered_modData_ovarian_2)
+
+km_fit_ov_median <- survfit(
+  Surv(survival_time, death) ~ age_group, data=filtered_modData_ovarian_2_median)
+
+filtered_modData_ovarian_2$age_at_diagnosis
+
+filtered_modData_ovarian_2$age_group
+
+lab_names_median <- c("Below Median", "Above Median")
+lab_names <- c("<50", "50-59", "60-69", "70+")
+
+# Kaplan-Meier Curve of Ovarian Data Set by Age Group
+
+library(RColorBrewer)
+display.brewer.all()
+
+kap_ov<-ggsurvplot(km_fit_ov, 
+                     size=1.5,
+                     palette = 'viridis',
+                     title = "Ovarian Cancer: Patient Survival by Age Group", 
+                     risk.table =FALSE, 
+                   pval = TRUE,
+                   legend.title = "Age Group",
+           legend.labs = lab_names, xlab = 'Time (months)', font.x = "bold",
+           font.y="bold",
+           font.title="bold", conf.int = TRUE)
+
+kap_ov_median<-ggsurvplot(km_fit_ov_median, 
+                     size=1.5,
+                     palette = 'viridis',
+                     title = "Ovarian Cancer: Patient Survival by Age Group", 
+                     risk.table =FALSE, 
+                   pval = TRUE,
+                   legend.title = "Age Group",
+           legend.labs = lab_names_median, xlab = 'Time (months)', font.x = "bold",
+           font.y="bold",
+           font.title="bold", conf.int = TRUE)
+
+kap_ov
+kap_ov_median
+
+# Extract the ggplot object from ggsurvplot
+kap_ov_plot <- kap_ov$plot
+
+# Save the plot using ggsave with the extracted ggplot object
+ggsave("kap_ov_survival_plot.png", plot = kap_ov_plot, width = 7, height = 6)
+
+barplot(table(filtered_modData_ovarian_2$age_group),
+        main = "Frequency of Categories",
+        xlab = "Category",
+        ylab = "Frequency",
+        col = "skyblue",
+        border = "black")
+
+```
+
+Kaplan-Meier Curves by Clustering of Cancer Cells
+```{r}
+median_Tumor <- median(filtered_modData_ovarian_2$k_Tumor)
+
+ov_CK_quantile_33 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 0.33)
+ov_CK_quantile_67 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 0.67)
+
+filtered_modData_ovarian_2_median_tumor <- filtered_modData_ovarian %>%
+  mutate(tumor_group = case_when(
+    k_Tumor < ov_CK_quantile_33 ~ "Below 33%",
+    k_Tumor <= ov_CK_quantile_67 & k_Tumor >= ov_CK_quantile_33 ~ "33%-67%",
+    k_Tumor > ov_CK_quantile_67 ~ ">67%"
+  ))
+
+km_fit_ov_median_tumor <- survfit(
+  Surv(survival_time, death) ~ tumor_group, data=filtered_modData_ovarian_2_median_tumor)
+
+lab_names_median <- c("Below 33%", "33% - 67%", ">67%")
+
+library(RColorBrewer)
+display.brewer.all()
+
+kap_ov_median_tumor<-ggsurvplot(km_fit_ov_median_tumor, 
+                     size=1.5,
+                     palette = 'viridis',
+                     title = "Ovarian Cancer: Patient Survival by Cancer Cell Clustering", 
+                     risk.table =FALSE, 
+                   pval = TRUE,
+                   legend.title = "Cancer Cell Clustering",
+           legend.labs = lab_names_median, xlab = 'Time (months)', font.x = "bold",
+           font.y="bold",
+           font.title="bold", conf.int = FALSE)
+
+kap_ov_median_tumor
+
+```
+
+
+Cox Survival Curves
+```{r}
+
+ov_CK_quantile_25 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 0.25)
+ov_CK_quantile_50 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 0.50)
+ov_CK_quantile_75 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 0.75)
+ov_CK_quantile_25
+ov_CK_quantile_75
+
+newData_ov <- with(filtered_modData_ovarian, data.frame(k_Tumor = k_Tumor,
+                                                     age = mean(age_at_diagnosis, na.rm = TRUE),
+                                                     p_T_Helper = mean(p_T_Helper, na.rm = TRUE),
+                                                     k_Cytotoxic_T = mean(k_Cytotoxic_T, na.rm = TRUE),
+                                                     k_T_Helper = mean(k_T_Helper, na.rm = TRUE),
+                                                     k_CytotoxicT_Macrophage = mean(k_CytotoxicT_Macrophage, na.rm = TRUE)
+                                                     ))
+
+
+
+
+filtered_modData_ovarian_2 <- filtered_modData_ovarian %>%
+  mutate(tumor_group = case_when(
+    k_Tumor >= ov_CK_quantile_50 ~ "Above Median",
+    k_Tumor < ov_CK_quantile_50 ~ "Below Median"
+  ))
+
+surv_obj <- Surv(y_new$time, y_new$status)
+surv_obj
+
+x_ov_group <- model.matrix(surv_obj ~ tumor_group, filtered_modData_ovarian_2)
+x_ov_group
+
+y_new <- filtered_modData_ovarian_2 %>%
+  mutate(time=survival_time,
+         status=death) %>%
+  select(time, status) 
+y_new
+
+
+final_fit<-glmnet(x_ov_group, surv_obj, alpha=0.95, lambda=lambda_min_ov, family = "cox", standardize = TRUE)
+log_hr <- predict(final_fit, s = lambda_min_ov, type = "link", newx = x_ov_group)
+cum_hazard <- exp(log_hr)
+surv_prob <- exp(-cum_hazard)
+surv_data <- data.frame(
+  time = y_new$time,
+  status = y_new$status,
+  group = filtered_modData_ovarian_2$tumor_group,
+  surv_prob = surv_prob
+)
+
+surv_data$group <- factor(surv_data$group)
+
+surv_fit <- survfit(Surv(time, status) ~ group, data = surv_data)
+
+plot(surv_fit, col = c("blue", "red", "green", "grey"), lty = 1:4, 
+     xlab = "Time", ylab = "Survival Probability", 
+     main = "Survival Curves by Ovarian Cancer Cell Group")
+legend("topright", legend = levels(surv_data$group), col = c("blue", "red", "green", "grey"), lty = 1:3, cex = 0.8)
+
+
+# Survival Curve plot by tumor cell clustering
+median_Tumor <- median(filtered_modData_ovarian_2$k_Tumor)
+
+filtered_modData_ovarian_2_median_tumor <- filtered_modData_ovarian_2 %>%
+  mutate(tumor_group = case_when(
+    k_Tumor < median_Tumor ~ "Below Median",
+    k_Tumor >= median_Tumor ~ "Above Median",
+  ))
+
+x_ov_CK_group <- model.matrix(surv_obj ~ tumor_group, filtered_modData_ovarian_2_median_tumor)
+x_ov_CK_group
+
+final_fit<-glmnet(x_ov_CK_group, surv_obj, alpha=0.95, lambda=lambda_min_ov, family = "cox", standardize = TRUE)
+
+
+log_hr <- predict(final_fit, s = lambda_min_ov, type = "link", newx = x_ov_CK_group)
+cum_hazard <- exp(log_hr)
+surv_prob <- exp(-cum_hazard)
+surv_data <- data.frame(
+  time = y_new$time,
+  status = y_new$status,
+  group = filtered_modData_ovarian_2_median_tumor$tumor_group,
+  surv_prob = surv_prob
+)
+
+surv_data$group <- factor(surv_data$group)
+
+surv_fit <- survfit(Surv(time, status) ~ group, data = surv_data)
+
+plot(surv_fit, col = c("blue", "red", "green", "grey"), lty = 1:4, 
+     xlab = "Time", ylab = "Survival Probability", 
+     main = "Survival Curves by Ovarian Cancer Cell Clustering")
+legend("topright", legend = levels(surv_data$group), col = c("blue", "red", "green", "grey"), lty = 1:3, cex = 0.8)
+
+
+
+km_fit_ov_median_tumor <- survfit(
+  Surv(survival_time, death) ~ tumor_group, data=filtered_modData_ovarian_2_median_tumor)
+
+
+
+
+# Extra code
+surv_prob <- exp(-pred)
+surv_data <- data.frame(time = y_new$time, surv_prob = surv_prob)
+
+surv_fit <- survfit(Surv(y_new$time, y_new$status) ~ 1, data = surv_data)
+
+plot(surv_fit, xlab = "Time", ylab = "Survival Probability", main = "Survival Curves")
+
+
+
+```
+
+
+
+```{r}
+median_Cytotoxic_T <- median(filtered_modData_ovarian$k_Cytotoxic_T)
+
+filtered_modData_ovarian_median_Cytotoxic_T <- filtered_modData_ovarian %>%
+  mutate(CytoTcell_group = case_when(
+    k_Cytotoxic_T < median_Cytotoxic_T ~ "Below Median",
+    k_Cytotoxic_T >= median_Cytotoxic_T ~ "Above Median",
+  ))
+
+km_fit_ovarian_median_Cytotoxic_T <- survfit(
+  Surv(survival_time, death) ~ CytoTcell_group, data=filtered_modData_ovarian_median_Cytotoxic_T)
+
+lab_names_median <- c("Below Median (Low Clustering)", "Above Median (High Clustering)")
+
+library(RColorBrewer)
+display.brewer.all()
+
+kap_ovarian_median_Cytotoxic_T<-ggsurvplot(km_fit_ovarian_median_Cytotoxic_T, 
+                     size=1.5,
+                     palette = 'viridis',
+                     title = "Ovarian Cancer: Patient Survival by Cytotoxic T Cell Clustering", 
+                     risk.table =FALSE, 
+                   pval = TRUE,
+                   legend.title = "Cytotoxic T Cell Clustering",
+           legend.labs = lab_names_median, xlab = 'Time (months)', font.x = "bold",
+           font.y="bold",
+           font.title="bold", conf.int = TRUE)
+
+kap_ovarian_median_Cytotoxic_T
+```
+
+
+```{r}
+median_T_Helper <- median(filtered_modData_ovarian$k_T_Helper)
+
+ov_THelp_quantile_25 <- quantile(filtered_modData_ovarian$k_T_Helper, probs = 0.25)
+ov_THelp_quantile_50 <- quantile(filtered_modData_ovarian$k_T_Helper, probs = 0.50)
+ov_THelp_quantile_75 <- quantile(filtered_modData_ovarian$k_T_Helper, probs = 0.75)
+ov_THelp_quantile_25
+ov_CK_quantile_75
+
+filtered_modData_ovarian_median_T_Helper <- filtered_modData_ovarian %>%
+  mutate(T_Helper_cell_group = case_when(
+    k_T_Helper < median_T_Helper ~ "Below Median",
+    k_T_Helper >= median_T_Helper ~ "Above Median",
+  ))
+
+km_fit_ovarian_median_T_Helper <- survfit(
+  Surv(survival_time, death) ~ T_Helper_cell_group, data=filtered_modData_ovarian_median_T_Helper)
+
+lab_names_median <- c("Below Median (Low Clustering)", "Above Median (High Clustering)")
+
+library(RColorBrewer)
+display.brewer.all()
+
+kap_ovarian_median_T_Helper<-ggsurvplot(km_fit_ovarian_median_T_Helper, 
+                     size=1.5,
+                     palette = 'viridis',
+                     title = "Ovarian Cancer: Patient Survival by T Helper Cell Clustering", 
+                     risk.table =FALSE, 
+                   pval = TRUE,
+                   legend.title = "T Helper Cell Clustering",
+           legend.labs = lab_names_median, xlab = 'Time (months)', font.x = "bold",
+           font.y="bold",
+           font.title="bold", conf.int = TRUE)
+
+kap_ovarian_median_T_Helper
+```
+
+```{r}
+median_CytotoxicT_Macro <- median(filtered_modData_ovarian$k_CytotoxicT_Macrophage)
+
+filtered_modData_ovarian_median_CytotoxicT_Macro <- filtered_modData_ovarian %>%
+  mutate(CytoT_Macro_cell_group = case_when(
+    k_CytotoxicT_Macrophage < median_CytotoxicT_Macro ~ "Below Median",
+    k_CytotoxicT_Macrophage >= median_CytotoxicT_Macro ~ "Above Median",
+  ))
+
+km_fit_ovarian_median_CytotoxicT_Macro <- survfit(
+  Surv(survival_time, death) ~ CytoT_Macro_cell_group, data=filtered_modData_ovarian_median_CytotoxicT_Macro)
+
+lab_names_median <- c("Below Median (Low Clustering)", "Above Median (High Clustering)")
+
+library(RColorBrewer)
+display.brewer.all()
+
+kap_ovarian_median_CytotoxicT_Macro<-ggsurvplot(km_fit_ovarian_median_CytotoxicT_Macro, 
+                     size=1.5,
+                     palette = 'viridis',
+                     title = "Ovarian Cancer: Patient Survival by Cytotoxic T and Macrophage Cell Clustering", 
+                     risk.table =FALSE, 
+                   pval = TRUE,
+                   legend.title = "Cytotoxic T And Macrophage Cell Clustering",
+           legend.labs = lab_names_median, xlab = 'Time (months)', font.x = "bold",
+           font.y="bold",
+           font.title="bold", conf.int = TRUE)
+
+kap_ovarian_median_CytotoxicT_Macro
+```
+
+
+
+```{r}
+ov_CK_quantile_25 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 0.25)
+ov_CK_quantile_50 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 0.50)
+ov_CK_quantile_75 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 0.75)
+ov_CK_quantile_25
+ov_CK_quantile_75
+
+newData_ov <- with(filtered_modData_ovarian, data.frame(k_Tumor = k_Tumor,
+                                                     age = mean(age_at_diagnosis),
+                                                     p_Tumor = mean(p_Tumor),
+                                                     p_Cytotoxic_T = mean(p_Cytotoxic_T),
+                                                     p_Macrophage = mean(p_Macrophage),
+                                                     p_T_Helper = mean(p_T_Helper),
+                                                     k_Cytotoxic_T = mean(k_Cytotoxic_T),
+                                                     k_Macrophage = mean(k_Macrophage),
+                                                     k_T_Helper = mean(k_T_Helper),
+                                                     k_Tumor_Macrophage = mean(k_Tumor_Macrophage),
+                                                     k_Tumor_THelper = mean(k_Tumor_THelper),
+                                                     k_CytotoxicT_Macrophage = mean(k_CytotoxicT_Macrophage),
+                                                     k_CytotoxicT_THelper = mean(k_CytotoxicT_THelper),
+                                                     k_Macrophage_THelper = mean(k_Macrophage_THelper)
+                                                     ))
+
+
+
+newData_ov <- newData_ov %>%
+  mutate(tumor_group = case_when(
+    k_Tumor < ov_CK_quantile_25  ~ "Below 25 Percentile",
+    k_Tumor >= ov_CK_quantile_25 & k_Tumor < ov_CK_quantile_50 ~ "Between 25 and 50th Percentile",
+    k_Tumor >= ov_CK_quantile_50 & k_Tumor < ov_CK_quantile_75 ~ "Between 50 and 75th Percentile",
+    k_Tumor >= ov_CK_quantile_75 ~ "Above 75th Percentile",
+  ))
+
+surv_obj <- Surv(y_new$time, y_new$status)
+surv_obj
+
+
+x_ov_group <- model.matrix(surv_obj ~ tumor_group + k_Tumor + age + p_Tumor + p_Cytotoxic_T + p_Macrophage + p_T_Helper + k_Cytotoxic_T + k_Macrophage + k_T_Helper + k_Tumor_Macrophage + k_Tumor_THelper + k_CytotoxicT_Macrophage + k_CytotoxicT_THelper + k_Macrophage_THelper, newData_ov)
+x_ov_group
+
+y_new <- filtered_modData_ovarian_2 %>%
+  mutate(time=survival_time,
+         status=death) %>%
+  select(time, status) 
+y_new
+
+final_fit<-glmnet(x_ov_group, surv_obj, alpha=0.95, lambda=lambda_min_ov, family = "cox", standardize = TRUE)
+log_hr <- predict(final_fit, s = lambda_min_ov, type = "link", newx = x_ov_group)
+cum_hazard <- exp(log_hr)
+surv_prob <- exp(-cum_hazard)
+surv_data <- data.frame(
+  time = y_new$time,
+  status = y_new$status,
+  group = filtered_modData_ovarian_2$tumor_group,
+  surv_prob = surv_prob
+)
+
+surv_data$group <- factor(surv_data$group)
+
+surv_fit <- survfit(Surv(time, status) ~ group, data = surv_data)
+
+plot(surv_fit, col = c("blue", "red", "green", "grey"), lty = 1:4, 
+     xlab = "Time", ylab = "Survival Probability", 
+     main = "Survival Curves by Ovarian Cancer Cell Group")
+legend("topright", legend = levels(surv_data$group), col = c("blue", "red", "green", "grey"), lty = 1:3, cex = 0.8)
+
+```
+
+```{r}
+newData_ov <- with(filtered_modData_ovarian, data.frame(cluster = c(ov_CK_quantile_25, ov_CK_quantile_75),
+                                                     age = mean(age_at_diagnosis),
+                                                     p_Tumor = mean(p_Tumor),
+                                                     p_Cytotoxic_T = mean(p_Cytotoxic_T),
+                                                     p_Macrophage = mean(p_Macrophage),
+                                                     p_T_Helper = mean(p_T_Helper),
+                                                     k_Cytotoxic_T = mean(k_Cytotoxic_T),
+                                                     k_Macrophage = mean(k_Macrophage),
+                                                     k_T_Helper = mean(k_T_Helper),
+                                                     k_Tumor_Macrophage = mean(k_Tumor_Macrophage),
+                                                     k_Tumor_THelper = mean(k_Tumor_THelper),
+                                                     k_CytotoxicT_Macrophage = mean(k_CytotoxicT_Macrophage),
+                                                     k_CytotoxicT_THelper = mean(k_CytotoxicT_THelper),
+                                                     k_Macrophage_THelper = mean(k_Macrophage_THelper)
+                                                     ))
+
+
+fit <- survfit(out, newdata = newData_ov)
+
+ggsurvplot(fit, conf.int = TRUE, legend.labs=c("25th Percentile", "75 Percentile"),
+           ggtheme = theme_minimal())
+```
+
+

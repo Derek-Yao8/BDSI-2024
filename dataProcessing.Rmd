@@ -1,0 +1,160 @@
+---
+title: "Data Preparation"
+author: "Grant Carr"
+date: "2024-05-20"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Loading Packages
+
+```{r}
+# if (!require("BiocManager", quietly = TRUE))
+#   install.packages("BiocManager")
+# BiocManager::install("VectraPolarisData")
+library(tidyverse)
+library(data.table)
+```
+
+Load Lung Data
+```{r}
+lung_data = VectraPolarisData::HumanLungCancerV3()
+```
+
+Extract and Format Cell Level Data and Patient Metadata
+```{r}
+# Get the x coordinates for the cells
+cell_x_coords = SpatialExperiment::spatialCoords(lung_data)[,1] %>% as.numeric() 
+# Get the y coordinates for the cells
+cell_y_coords = SpatialExperiment::spatialCoords(lung_data)[,2] %>% as.numeric() 
+# Get the ids for the slides
+slide_ids = lung_data$slide_id
+# Get the ids for the ROIs
+image_ids = lung_data$sample_id %>% gsub("  ", " ", .)
+
+# get the phenotypes for each cell
+cell_marks = tibble(
+  cd_14 = lung_data$phenotype_cd14 == "CD14+",
+  cd_19 = lung_data$phenotype_cd19 == "CD19+",
+  cd_4 = lung_data$phenotype_cd4 == "CD4+",
+  cd_8 = lung_data$phenotype_cd8 == "CD8+",
+  ck = lung_data$phenotype_ck == "CK+",
+  other = lung_data$phenotype_other == "Other+"
+) %>% # make n by 6 table of indicators
+  as.matrix() %>% # make table into n x 6 matrix
+  (\(m){
+    m %*% 1:6
+  }) %>% # multiply each 0/1 column by 6x1 vector of 1-6, then add columns 
+  # together. Now we have n x 1 vector of 0-6
+  map_chr(\(x) c(NA, "CD14", "CD19", "CD4", "CD8", "CK", "Other")[x + 1])
+  # maps 0-6 to vector of NA or cell type. now a vector of length n with 
+  # cell types
+
+na_marks = which(is.na(cell_marks))
+
+lung_cells <- data.frame(
+  slide_id = slide_ids[-na_marks], image_id = image_ids[-na_marks],
+  x = cell_x_coords[-na_marks], y = cell_y_coords[-na_marks], pheno = cell_marks[-na_marks]
+)
+
+lung_metadata = metadata(lung_data)$clinical_data %>%
+  tibble() %>% 
+  mutate(slide_id = ifelse(nchar(slide_id) == 12, paste0(slide_id, "_"), slide_id))
+colnames(lung_metadata)[1] = "patient_id"
+    
+lung_slide_id_tibble = tibble(
+  image_id = unique(image_ids),
+  patient_id = substr(image_id, 1, 13)
+)
+lung_metadata = left_join(lung_slide_id_tibble, lung_metadata, by = "patient_id")
+lung_mplx <- list(
+  lung_cells = lung_cells, lung_metadata = lung_metadata
+)
+```
+
+Load Ovarian Data
+```{r}
+ovarian_data = VectraPolarisData::HumanOvarianCancerVP()
+```
+
+Extract and Format Cell Level Data and Patient Metadata
+```{r}
+# Get the x coordinates for the cells
+cell_x_coords = SpatialExperiment::spatialCoords(ovarian_data)[,1] %>% as.numeric() 
+# Get the y coordinates for the cells
+cell_y_coords = SpatialExperiment::spatialCoords(ovarian_data)[,2] %>% as.numeric() 
+# Get the ids for the TMAs
+slide_ids = ovarian_data$slide_id
+# Get the ids for the patients/ROIs
+sample_ids = ovarian_data$sample_id
+
+# from paper associated with this data: https://aacrjournals.org/mcr/article/19/12/1973/675069/The-Spatial-Context-of-Tumor-Infiltrating-Immune 
+# Cells were classified using the following marker designations: B cell (CD19+), 
+# macrophage (CD68+), CD8 T cell (CD3+ CD8+), CD4 T cell (CD3+ CD8−), and 
+# tumor cell (CK+).
+
+# CD4 t cells are helper t cells
+# CD8 t cells are cytotoxic t
+
+# ovarian_data_long = ovarian_data_long %>% mutate(`Cell Type` = case_when(
+#   Phenotype=="CD3+ CD8+" ~ "T Cell (CD8+)",
+#   Phenotype=="CD68+" ~ "Macrophage",
+#   Phenotype=="CK+" ~ "Tumor",
+#   Phenotype == "CD19+" ~ "B Cell",
+#   Phenotype=="CD3+ CD8-" ~ "T Cell (CD4+)",
+#   
+#   TRUE ~ "other"
+# ))
+
+cell_marks_ovarian = ifelse(
+  ovarian_data$phenotype_cd3 == "CD3+" & ovarian_data$phenotype_cd8 == "CD8+",
+  "Cytotoxic T", ifelse(
+    ovarian_data$phenotype_cd68 == "CD68+", "Macrophage", ifelse(
+      ovarian_data$phenotype_ck == "CK+", "Tumor", ifelse(
+        ovarian_data$phenotype_cd19 == "CD19+", "B Cell", ifelse(
+          ovarian_data$phenotype_cd3 == "CD3+" & 
+            ovarian_data$phenotype_cd8 == "CD8-", "T Helper", "Other"
+        )
+      )
+    )
+  )
+)
+
+ovarian_cells <- data.frame(
+  slide_id = slide_ids, sample_id = sample_ids,
+  x = cell_x_coords, y = cell_y_coords, pheno = cell_marks_ovarian
+)
+
+ovarian_cells <- ovarian_cells %>% filter(
+  !(sample_id %in% c(
+    "030120 P9HuP6 TMA 1-A_Core[1,7,A]_[6035,51922].im3",
+    "030120 P9HuP6 TMA 1-A_Core[1,8,A]_[6099,54080].im3",
+    "030120 P9HuP6 TMA 1-B_Core[1,7,A]_[5838,48555].im3",
+    "030120 P9HuP6 TMA 1-B_Core[1,8,A]_[5838,50714].im3"
+  ))
+)
+
+ovarian_metadata = metadata(ovarian_data)$clinical_data %>%
+  tibble()
+ovarian_mplx <- list(
+  ovarian_cells = ovarian_cells, ovarian_metadata = ovarian_metadata
+)
+
+```
+
+Save Data
+```{r}
+# saveRDS(
+#   ovarian_mplx, "/Users/grantcarr/Documents/Michigan/BDSI2024/ovarianData.RDS"
+# )
+# saveRDS(
+#   lung_mplx, "/Users/grantcarr/Documents/Michigan/BDSI2024/lungData.RDS"
+# )
+```
+
+

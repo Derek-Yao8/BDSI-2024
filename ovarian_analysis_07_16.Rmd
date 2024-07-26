@@ -1,0 +1,718 @@
+---
+title: "Ovarian Analysis"
+author: "Derek Yao"
+date: "2024-07-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r dat}
+
+library(survival)
+library(ranger)
+library(ggplot2)
+library(dplyr)
+library(ggfortify)
+library(survminer)
+library(glmnet)
+library(tidyr)
+library(rjags)
+library(afthd)
+library(penAFT)
+library(plyr)
+library(tidyr)
+
+
+###
+ovarian_dat<-read.csv("/Users/derekyao/Documents/BDSI/Cancer Data Science/Data/newOvKData.csv")
+
+names(ovarian_dat)
+```
+
+
+Kaplan Meier Curve for Ovarian Patients
+```{r kaplan}
+#Kaplan Meier Curve for ovarian
+km_fit_ov <- survfit(
+  Surv(survival_time, death) ~ 1, data=ovarian_dat)
+  
+
+kap_ov<-ggsurvplot(km_fit_ov, 
+                     size=1.5,
+                     palette = "red",
+                     title = "Survival Curve for Ovarian Cancer Patients", 
+                     risk.table =T)
+
+kap_ov
+```
+
+
+
+Excluded variables that include CD19
+```{r prep}
+
+#define x values
+ovarian_k <- ovarian_dat %>%
+  select(age_at_diagnosis,
+         p_Tumor,
+         p_Cytotoxic_T,
+         p_Macrophage,
+         p_T_Helper,
+         k_Tumor,   
+         k_Cytotoxic_T,    
+         k_Macrophage,
+         k_T_Helper,
+         k_Tumor_CytotoxicT,
+         k_Tumor_Macrophage,
+         k_Tumor_THelper,
+         k_CytotoxicT_Macrophage,
+         k_CytotoxicT_THelper,
+         k_Macrophage_THelper,
+       ) %>%
+  filter(complete.cases(.))
+
+ovarian_k
+
+
+#remove rows from total data set
+filtered_modData_ovarian <- ovarian_dat[complete.cases(ovarian_dat %>%
+                                             select(p_Tumor,
+                                                    p_Cytotoxic_T,
+                                                    p_Macrophage,
+                                                    p_T_Helper,
+                                                    k_Tumor,   
+                                                    k_Cytotoxic_T,    
+                                                    k_Macrophage,
+                                                    k_T_Helper,
+                                                    k_Tumor_CytotoxicT,
+                                                    k_Tumor_Macrophage,
+                                                    k_Tumor_THelper,
+                                                    k_CytotoxicT_Macrophage,
+                                                    k_CytotoxicT_THelper,
+                                                    k_Macrophage_THelper
+                                                  )), ] 
+
+#fit
+x_ov <- as.matrix(ovarian_k)
+x_ov
+
+y_ov <- filtered_modData_ovarian %>%
+  mutate(time=survival_time,
+         status=death) %>%
+  select(time, status) %>%
+  as.matrix()
+y_ov
+```
+
+
+```{r}
+# Checking the PH assumption for Cox regression model
+coxfit = coxph(Surv(survival_time, death)~age_at_diagnosis+stage+
+                                                    p_Tumor+
+                                                    p_Cytotoxic_T+
+                                                    p_Macrophage+
+                                                    p_T_Helper+
+                                                    k_Tumor+  
+                                                    k_Cytotoxic_T+   
+                                                    k_Macrophage+
+                                                    k_T_Helper+
+                                                    k_Tumor_CytotoxicT+
+                                                    k_Tumor_Macrophage+
+                                                    k_Tumor_THelper+
+                                                    k_CytotoxicT_Macrophage+
+                                                    k_CytotoxicT_THelper+
+                                                    k_Macrophage_THelper, data=filtered_modData_ovarian)
+coxfit
+
+test.ph = cox.zph(coxfit)
+test.ph
+ggcox <- ggcoxzph(test.ph)
+print(ggcox)
+print(ggcox[[1]])
+print(ggcox[[2]])
+print(ggcox[[3]])
+print(ggcox[[4]])
+print(ggcox[[5]])
+print(ggcox[[6]])
+print(ggcox[[7]])
+print(ggcox[[8]])
+print(ggcox[[9]])
+print(ggcox[[10]])
+print(ggcox[[11]])
+print(ggcox[[12]])
+print(ggcox[[13]])
+print(ggcox[[14]])
+print(ggcox[[15]])
+print(ggcox[[16]])
+# According to the plots, all variables do not seem to violate the PH assumption
+```
+
+
+Cox Model for Ovarian Patients
+alpha= 0.95
+lamba = 0.07308709
+```{r fit}
+#Find alpha value
+
+
+cvm <- NULL
+alpha <- seq(0.05, 1, by = 0.05)
+lambda <- list()
+lambda_alphamin <- list()
+alpha.min <- NULL
+y_ov
+length(y_ov)
+
+set.seed(1)
+for(j in 1:200){
+  foldid <- sample(1:10, size = nrow(y_ov), replace = T)
+  for(i in 1:19){
+    a <- alpha[i]
+    enetMod.cv <- cv.glmnet(
+      x = x_ov, y = y_ov,
+      #nfolds=10,
+      #weights = train$WTSA2YR, 
+      foldid = foldid, 
+      alpha = a, 
+      #added in line to make it cox
+      family="cox",
+      #added type.measure
+      type.measure = "deviance", 
+      #changed standardize from F to T
+      standardize = TRUE
+      #penalty.factor = c(rep(0, times = 10), rep(1, times = 29))
+    )
+    cvm[i] <- min(enetMod.cv$cvm)
+    lambda[[i]] <- c(enetMod.cv$lambda.min, enetMod.cv$lambda.1se)
+  }
+  alpha.min[j] <- alpha[which.min(cvm)]
+  lambda_alphamin[[j]] <- lambda[[which.min(cvm)]]
+  
+  print(j)
+}
+
+
+hist(alpha.min, breaks = seq(0.05, 1, by = 0.05))
+summary(alpha.min)
+alpha_freq_table_cox <- table(alpha.min)
+
+chosen_alpha_cox <- which.max(alpha_freq_table_cox)
+alpha_with_max_freq_cox <- names(alpha_freq_table_cox)[chosen_alpha_cox]
+
+alpha_with_max_freq_cox
+
+# set age and gender equal to 0 so that model does not penalize them
+# penalty_vars <- rep(1, ncol(x_ov))
+# penalty_vars
+# penalty_vars[c(1, 2)] <- 0
+
+#fit model
+fit <- glmnet(x_ov, y_ov, family = "cox", alpha = alpha_with_max_freq_cox)
+plot(fit)
+
+#use alpha selected by for loop
+
+# Select lambda using cross-validation
+set.seed(1)
+cvfit_ov <- cv.glmnet(x_ov, y_ov, 
+                   family = "cox",
+                   alpha=alpha_with_max_freq_cox,
+                   type.measure = "deviance", 
+                   standardize = TRUE,
+                   nfolds=10) 
+
+
+plot(cvfit_ov)
+
+# Extract lambda values
+lambda_min_ov <- cvfit_ov$lambda.min
+lambda_min_ov
+
+# Coefficients at best lambda - survival model
+# Final model
+out = glmnet(x_ov, y_ov, family = "cox", alpha = alpha_with_max_freq_cox, lambda = lambda_min_ov, type.measure = "deviance", standardize = TRUE)
+coef = coef(out, standardize = TRUE)
+coef
+
+# Calculate concordance
+ pred = predict(out, x_ov, s = lambda_min_ov)
+Cindex(pred, y_ov, weights = rep(1, nrow(y_ov)))
+
+
+
+ov_CK_quantile_10 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 0.01)
+ov_CK_quantile_40 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 0.99)
+ov_CK_quantile_10 = 0
+ov_CK_quantile_40 = mean(filtered_modData_ovarian$k_Tumor)
+
+ov_CK_quantile_33 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 0.10)
+ov_CK_quantile_67 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 0.90)
+ov_CK_quantile_100 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 1)
+
+median_CK <- median(filtered_modData_ovarian$k_Tumor)
+
+hist(filtered_modData_ovarian$k_Tumor, breaks = 100)
+
+newData_ov <- with(filtered_modData_ovarian, data.frame(age_at_diagnosis = mean(age_at_diagnosis),
+                                                     p_Tumor = mean(p_Tumor),
+                                                     p_Cytotoxic_T = mean(p_Cytotoxic_T),
+                                                     p_Macrophage = mean(p_Macrophage),
+                                                     p_T_Helper = mean(p_T_Helper),
+                                                     k_Tumor = c(ov_CK_quantile_33, ov_CK_quantile_67),
+                                                     k_Cytotoxic_T = mean(k_Cytotoxic_T),
+                                                     k_Macrophage = mean(k_Macrophage),
+                                                     k_T_Helper = mean(k_T_Helper),
+                                                     k_Tumor_CytotoxicT = mean(k_Tumor_CytotoxicT),
+                                                     k_Tumor_Macrophage = mean(k_Tumor_Macrophage),
+                                                     k_Tumor_THelper = mean(k_Tumor_THelper),
+                                                     k_CytotoxicT_Macrophage = mean(k_CytotoxicT_Macrophage),
+                                                     k_CytotoxicT_THelper = mean(k_CytotoxicT_THelper),
+                                                     k_Macrophage_THelper = mean(k_Macrophage_THelper)
+                                                     ))
+
+
+
+matrixnewData_ov <- as.matrix(newData_ov)
+
+x_new <- model.matrix(~age_at_diagnosis + p_Tumor + p_Cytotoxic_T + p_Macrophage + p_T_Helper + k_Tumor + k_Cytotoxic_T + k_Macrophage + k_T_Helper + k_Tumor_Macrophage + k_Tumor_THelper + k_CytotoxicT_Macrophage + k_CytotoxicT_THelper + k_Macrophage_THelper, data = newData_ov)
+
+y_fit <- Surv(time = filtered_modData_ovarian$survival_time, event = filtered_modData_ovarian$death)
+
+survfit_obj <- survival::survfit(out, s = lambda_min_ov, x = x_ov, y = y_fit, newx = as.matrix(newData_ov))
+plot(survfit_obj)
+# Plot using ggsurvplot
+ggsurvplot(survfit_obj, data=x_ov, palette=c("red","darkblue"), xlab = "Time (months)", font.title = c(18,"bold","black"), font.x = c(15,"bold"), font.y = c(15,"bold"), font.xtickslab=c(13,"bold"), font.ytickslab = c(13,"bold"), title = "Ovarian Data: Clustering of Tumor Cells", legend.labs = c("Low Clustering", "High Clustering"),
+           ggtheme = theme_bw())
+plot(survival::survfit(out, s = lambda_min_ov, x = x_ov, y = y_fit))
+
+```
+
+Survival Curves of Cytotoxic T Cell Clustering
+```{r}
+ov_CK_quantile_10 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 0.01)
+ov_CK_quantile_40 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 0.99)
+ov_CK_quantile_10 = 0
+ov_CK_quantile_40 = mean(filtered_modData_ovarian$k_Tumor)
+
+ov_CytoT_quantile_25 <- quantile(filtered_modData_ovarian$k_Cytotoxic_T, probs = 0.25)
+ov_CytoT_quantile_75 <- quantile(filtered_modData_ovarian$k_Cytotoxic_T, probs = 0.75)
+ov_CytoT_quantile_100 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 1)
+
+median_CK <- median(filtered_modData_ovarian$k_Tumor)
+
+hist(filtered_modData_ovarian$k_Tumor, breaks = 100)
+
+newData_ov <- with(filtered_modData_ovarian, data.frame(age_at_diagnosis = mean(age_at_diagnosis),
+                                                     p_Tumor = mean(p_Tumor),
+                                                     p_Cytotoxic_T = mean(p_Cytotoxic_T),
+                                                     p_Macrophage = mean(p_Macrophage),
+                                                     p_T_Helper = mean(p_T_Helper),
+                                                     k_Tumor = mean(k_Tumor),
+                                                     k_Cytotoxic_T = c(ov_CytoT_quantile_25, ov_CytoT_quantile_75),
+                                                     k_Macrophage = mean(k_Macrophage),
+                                                     k_T_Helper = mean(k_T_Helper),
+                                                     k_Tumor_CytotoxicT = mean(k_Tumor_CytotoxicT),
+                                                     k_Tumor_Macrophage = mean(k_Tumor_Macrophage),
+                                                     k_Tumor_THelper = mean(k_Tumor_THelper),
+                                                     k_CytotoxicT_Macrophage = mean(k_CytotoxicT_Macrophage),
+                                                     k_CytotoxicT_THelper = mean(k_CytotoxicT_THelper),
+                                                     k_Macrophage_THelper = mean(k_Macrophage_THelper)
+                                                     ))
+
+
+
+matrixnewData_ov <- as.matrix(newData_ov)
+
+x_new <- model.matrix(~age_at_diagnosis + p_Tumor + p_Cytotoxic_T + p_Macrophage + p_T_Helper + k_Tumor + k_Cytotoxic_T + k_Macrophage + k_T_Helper + k_Tumor_Macrophage + k_Tumor_THelper + k_CytotoxicT_Macrophage + k_CytotoxicT_THelper + k_Macrophage_THelper, data = newData_ov)
+
+y_fit <- Surv(time = filtered_modData_ovarian$survival_time, event = filtered_modData_ovarian$death)
+
+survfit_obj <- survival::survfit(out, s = lambda_min_ov, x = x_ov, y = y_fit, newx = as.matrix(newData_ov))
+plot(survfit_obj)
+# Plot using ggsurvplot
+ggsurvplot(survfit_obj, data=x_ov, conf.int = TRUE,
+           ggtheme = theme_minimal())
+```
+
+Survival Curves for T Helper Cell Proportions
+```{r}
+ov_CK_quantile_10 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 0.01)
+ov_CK_quantile_40 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 0.99)
+ov_CK_quantile_10 = 0
+ov_CK_quantile_40 = mean(filtered_modData_ovarian$k_Tumor)
+
+ov_THelper_quantile_25 <- quantile(filtered_modData_ovarian$p_T_Helper, probs = 0.10)
+ov_THelper_quantile_75 <- quantile(filtered_modData_ovarian$p_T_Helper, probs = 0.90)
+ov_CytoT_quantile_100 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 1)
+
+median_CK <- median(filtered_modData_ovarian$k_Tumor)
+
+hist(filtered_modData_ovarian$k_Tumor, breaks = 100)
+
+newData_ov <- with(filtered_modData_ovarian, data.frame(age_at_diagnosis = mean(age_at_diagnosis),
+                                                     p_Tumor = mean(p_Tumor),
+                                                     p_Cytotoxic_T = mean(p_Cytotoxic_T),
+                                                     p_Macrophage = mean(p_Macrophage),
+                                                     p_T_Helper = c(ov_THelper_quantile_25, ov_THelper_quantile_75),
+                                                     k_Tumor = mean(k_Tumor),
+                                                     k_Cytotoxic_T = mean(k_Cytotoxic_T),
+                                                     k_Macrophage = mean(k_Macrophage),
+                                                     k_T_Helper = mean(k_T_Helper),
+                                                     k_Tumor_CytotoxicT = mean(k_Tumor_CytotoxicT),
+                                                     k_Tumor_Macrophage = mean(k_Tumor_Macrophage),
+                                                     k_Tumor_THelper = mean(k_Tumor_THelper),
+                                                     k_CytotoxicT_Macrophage = mean(k_CytotoxicT_Macrophage),
+                                                     k_CytotoxicT_THelper = mean(k_CytotoxicT_THelper),
+                                                     k_Macrophage_THelper = mean(k_Macrophage_THelper)
+                                                     ))
+
+
+
+matrixnewData_ov <- as.matrix(newData_ov)
+
+x_new <- model.matrix(~age_at_diagnosis + p_Tumor + p_Cytotoxic_T + p_Macrophage + p_T_Helper + k_Tumor + k_Cytotoxic_T + k_Macrophage + k_T_Helper + k_Tumor_Macrophage + k_Tumor_THelper + k_CytotoxicT_Macrophage + k_CytotoxicT_THelper + k_Macrophage_THelper, data = newData_ov)
+
+y_fit <- Surv(time = filtered_modData_ovarian$survival_time, event = filtered_modData_ovarian$death)
+
+survfit_obj <- survival::survfit(out, s = lambda_min_ov, x = x_ov, y = y_fit, newx = as.matrix(newData_ov))
+plot(survfit_obj)
+# Plot using ggsurvplot
+ggsurvplot(survfit_obj, data=x_ov, palette=c("red","darkblue"), xlab = "Time (months)", font.title = c(18,"bold","black"), font.x = c(15,"bold"), font.y = c(15,"bold"), font.xtickslab=c(13,"bold"), font.ytickslab = c(13,"bold"), title = "Ovarian Data: Proportion of T-Helper Cells", legend.labs = c("10%", "90%"),
+           ggtheme = theme_bw())
+```
+
+```{r}
+ov_CK_quantile_10 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 0.01)
+ov_CK_quantile_40 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 0.99)
+ov_CK_quantile_10 = 0
+ov_CK_quantile_40 = mean(filtered_modData_ovarian$k_Tumor)
+
+ov_Cyto_Macro_quantile_25 <- quantile(filtered_modData_ovarian$k_CytotoxicT_Macrophage, probs = 0.10)
+ov_Cyto_Macro_quantile_75 <- quantile(filtered_modData_ovarian$k_CytotoxicT_Macrophage, probs = 0.90)
+ov_CytoT_quantile_100 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 1)
+
+median_CK <- median(filtered_modData_ovarian$k_Tumor)
+
+hist(filtered_modData_ovarian$k_Tumor, breaks = 100)
+
+newData_ov <- with(filtered_modData_ovarian, data.frame(age_at_diagnosis = mean(age_at_diagnosis),
+                                                     p_Tumor = mean(p_Tumor),
+                                                     p_Cytotoxic_T = mean(p_Cytotoxic_T),
+                                                     p_Macrophage = mean(p_Macrophage),
+                                                     p_T_Helper = mean(p_T_Helper),
+                                                     k_Tumor = mean(k_Tumor),
+                                                     k_Cytotoxic_T = mean(k_Cytotoxic_T),
+                                                     k_Macrophage = mean(k_Macrophage),
+                                                     k_T_Helper = mean(k_T_Helper),
+                                                     k_Tumor_CytotoxicT = mean(k_Tumor_CytotoxicT),
+                                                     k_Tumor_Macrophage = mean(k_Tumor_Macrophage),
+                                                     k_Tumor_THelper = mean(k_Tumor_THelper),
+                                                     k_CytotoxicT_Macrophage = c(ov_Cyto_Macro_quantile_25, ov_Cyto_Macro_quantile_75),
+                                                     k_CytotoxicT_THelper = mean(k_CytotoxicT_THelper),
+                                                     k_Macrophage_THelper = mean(k_Macrophage_THelper)
+                                                     ))
+
+
+
+matrixnewData_ov <- as.matrix(newData_ov)
+
+x_new <- model.matrix(~age_at_diagnosis + p_Tumor + p_Cytotoxic_T + p_Macrophage + p_T_Helper + k_Tumor + k_Cytotoxic_T + k_Macrophage + k_T_Helper + k_Tumor_Macrophage + k_Tumor_THelper + k_CytotoxicT_Macrophage + k_CytotoxicT_THelper + k_Macrophage_THelper, data = newData_ov)
+
+y_fit <- Surv(time = filtered_modData_ovarian$survival_time, event = filtered_modData_ovarian$death)
+
+survfit_obj <- survival::survfit(out, s = lambda_min_ov, x = x_ov, y = y_fit, newx = as.matrix(newData_ov))
+plot(survfit_obj)
+# Plot using ggsurvplot
+ggsurvplot(survfit_obj, data=x_ov, conf.int = TRUE,
+           ggtheme = theme_minimal())
+```
+
+Cox Model without Variable Selection
+```{r}
+selected_ovarian_k <- ovarian_dat %>% select(age_at_diagnosis,
+                                                                         p_T_Helper,
+                                                                         k_Tumor,
+                                                                         k_Cytotoxic_T,
+                                                                         k_T_Helper,
+                                                                         k_CytotoxicT_Macrophage) %>%
+  filter(complete.cases(.))
+
+selected_filtered_modData_ovarian <- ovarian_dat[complete.cases(ovarian_dat %>% 
+                                                                  select(age_at_diagnosis, 
+                                                                         p_T_Helper,
+                                                                         k_Tumor,
+                                                                         k_Cytotoxic_T,
+                                                                         k_T_Helper,
+                                                                         k_CytotoxicT_Macrophage)), ]
+
+selected_filtered_modData_ovarian
+
+x_selected <- as.matrix(selected_ovarian_k)
+
+y_selected <- selected_filtered_modData_ovarian %>% 
+  mutate(time = survival_time,
+         status = death) %>% 
+  select(time, status) %>%
+  as.matrix()
+
+
+ov_CK_quantile_25 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 0.25)
+ov_CK_quantile_75 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 0.75)
+ov_CK_quantile_100 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 1)
+
+median_CK <- median(filtered_modData_ovarian$k_Tumor)
+
+hist(filtered_modData_ovarian$k_Tumor, breaks = 100)
+
+
+selected_newData_ov <- with(filtered_modData_ovarian, data.frame(age_at_diagnosis = mean(age_at_diagnosis),
+                                                     p_T_Helper = mean(p_T_Helper),
+                                                     k_Tumor = c(ov_CK_quantile_25, ov_CK_quantile_75),
+                                                     k_Cytotoxic_T = mean(k_Cytotoxic_T),
+                                                     k_T_Helper = mean(k_T_Helper),
+                                                     k_CytotoxicT_Macrophage = mean(k_CytotoxicT_Macrophage),
+                                                     ))
+
+out_coxph <- coxph(Surv(survival_time, death) ~ age_at_diagnosis + p_T_Helper + k_Tumor + k_Cytotoxic_T + k_T_Helper + k_CytotoxicT_Macrophage, data=filtered_modData_ovarian)
+
+selected_matrixnewData_ov <- as.matrix(selected_newData_ov)
+
+fit <- suvfit(out_coxph, newdata=selected_newData_ov)
+# Plot using ggsurvplot
+ggsurvplot(fit, data=selected_newData_ov, conf.int = TRUE,
+           ggtheme = theme_minimal())
+plot(survival::survfit(out, s = lambda_min_ov, x = x_selected, y = y_fit))
+```
+
+
+
+AFT Model for Ovarian Patients
+new alpha = 0.95 chosen 84 times out of 200
+new lambda = 0.06394941
+```{r aft}
+startT <- Sys.time()
+ydf_ov <- as.data.frame(y_ov)
+
+logY_ov <- ydf_ov %>%
+  mutate(time = log(time),
+         status = status) 
+
+
+cvm <- NULL
+alpha <- seq(0.05, 1, by = 0.05)
+lambda <- c()
+lambda_alphamin <- c()
+alpha.min_aft <- NULL
+
+set.seed(1)
+for(j in 1:200){
+  folds <- sample(1:10, nrow(ydf_ov), replace = T)
+  foldid <- lapply(1:10, function(x_ov){which(folds == x_ov)})
+  for(i in 1:19){
+    a <- alpha[i]
+    enetMod.cv <- penAFT.cv(x_ov, logY_ov$time, logY_ov$status, 
+                            nlambda = 50,
+                            penalty = NULL,
+                            alpha=a, cv.index = foldid,
+                            standardize=T)
+
+    cvm[i] <- min(enetMod.cv$cv.err.linPred)
+    # enetMod.cv$cvsd
+    lambda[i] <- enetMod.cv$lambda.min
+  }
+  alpha.min_aft[j] <- alpha[which.min(cvm)]
+  lambda_alphamin[j] <- lambda[which.min(cvm)]
+  
+  print(j)
+}
+
+hist(alpha.min_aft, breaks = seq(0.05, 1, by = 0.05))
+summary(alpha.min_aft)
+table(alpha.min_aft)
+
+alpha_freq_table_aft <- table(alpha.min_aft)
+
+chosen_alpha_aft <- which.max(alpha_freq_table_aft)
+alpha_with_max_freq_aft <- names(alpha_freq_table_aft)[chosen_alpha_aft]
+alpha_with_max_freq_aft
+
+# fit model using chosen alpha (need to fix)
+aft_fit_ov <- penAFT(x_ov, logY_ov$time, logY_ov$status,
+                           alpha=0.95)
+penAFT.trace(aft_fit_ov)
+
+# Choose lambda using cross-validation
+set.seed(1)
+aft_mod_ov <- penAFT.cv(x_ov, logY_ov$time, logY_ov$status, 
+                           nlambda = 50,
+                           penalty = NULL,
+                           alpha=0.95, nfolds=10, 
+                           standardize=T)
+
+lambda_aft <- aft_mod_ov$lambda.min
+lambda_aft
+
+coeff_ov<-penAFT.coef(aft_mod_ov, lambda = NULL)
+coeff_ov
+
+penAFT.plot(aft_mod_ov)
+
+names_ov <-c("age_at_diagnosis",
+             "p_Tumor",
+             "p_Cytotoxic_T",
+             "p_Macrophage",
+             "p_T_Helper",
+             "k_Tumor",
+             "k_Cytotoxic_T",
+             "k_Macrophage",
+             "k_T_Helper",
+             "k_Tumor_CytotoxicT",
+             "k_Tumor_Macrophage",
+             "k_Tumor_THelper",
+             "k_CytotoxicT_Macrophage",
+             "k_CytotoxicT_THelper",
+             "k_Macrophage_THelper")
+
+
+
+ov_aft_best_lambda<-aft_mod_ov$lambda.min
+ov_aft_best_lambda
+
+coeff_best_lambda_ov<-penAFT.coef(aft_mod_ov, lambda = ov_aft_best_lambda)
+coeff_best_lambda_ov
+
+aft_fit_final_ov <- penAFT(x_ov, logY_ov$time, logY_ov$status, penalty = NULL, alpha = 0.95, lambda = ov_aft_best_lambda, standardize = TRUE)
+
+aft_coef <- penAFT.coef(aft_fit_final_ov, lambda = ov_aft_best_lambda)
+
+aft_coef
+
+final_results_ovarian <- data.frame(Variable = names_ov, Coefficient = coeff_best_lambda_ov)
+final_results_ovarian
+
+# Calculate concordance
+pred_aft = penAFT.predict(aft_fit_final_ov, x_ov, lambda =ov_aft_best_lambda)
+Cindex(pred_aft, y_ov, weights = rep(1, nrow(y_ov)))
+
+
+y_fit <- Surv(time = logY_ov$time, event = logY_ov$status)
+
+library(afttest)
+
+afttest(y_fit ~ age_at_diagnosis + p_Tumor + p_Cytotoxic_T + p_Macrophage + p_T_Helper + k_Tumor + k_Cytotoxic_T + k_Macrophage + k_T_Helper + k_Tumor_Macrophage + k_Tumor_THelper + k_CytotoxicT_Macrophage + k_CytotoxicT_THelper + k_Macrophage_THelper, data = filtered_modData_ovarian)
+
+Sys.time() - startT
+```
+
+
+```{r}
+x_standardized = scale(x_ov) 
+final_fit  = glmnet(x_standardized, y_ov, alpha=0.95, lambda=lambda_min_ov, family = "cox", standardize = FALSE)
+final_coef = coef(final_fit, s = lambda_min_ov)
+
+label = colnames(x_ov)[which(abs(final_coef) > 0)]
+exp_coef = exp(final_coef[which(abs(final_coef) > 0)])
+sign_coef = 1 + 1 * (exp_coef < 1)
+df = data.frame(label = label, estimate = exp_coef, sign = sign_coef)
+df = df[-(1), ]
+df$label<-revalue(df$label, c("p_T_Helper"="Proportion T-Helper cell", "k_Tumor"="K Tumor cell", "k_Cytotoxic_T"="K Cytotoxic T-cell", "k_T_Helper"="K T-Helper cell", "k_CytotoxicT_Macrophage"="K Cytotoxic T-cell & Macrophage"))
+
+desired_order <- c("K Cytotoxic T-cell & Macrophage", "K T-Helper cell", "K Cytotoxic T-cell", "K Tumor cell", "Proportion T-Helper cell")
+
+df$label <- factor(df$label, levels = desired_order)
+df$sign = factor(df$sign)
+
+forest <- ggplot(df, aes(x = estimate, y = label, color = sign )) + 
+  geom_point(size = 5, shape = 18) + 
+  scale_color_manual(values=c( "darkgreen","red"))+
+  geom_vline(xintercept = 1, size = 0.5) + 
+  scale_y_discrete(name = "Selected Features") +
+  scale_x_continuous(name="Hazard ratio") +
+  theme(legend.position = "none") +
+  theme_classic() + ggtitle("Features Selected by Cox Model") + theme(plot.title = element_text(size=14, face="bold.italic")) +
+ theme(plot.title = element_text(size=23, face="bold.italic", hjust=0.5),
+    axis.title = element_text(size = 23,  face="bold"),
+        axis.text = element_text(size = 20, color="black"),
+        legend.title = element_text(size = 18),
+        legend.text = element_text(size = 18))+
+  labs(color = "Sign")
+
+
+forest <- ggplot(df, aes(x = estimate, y = label, color = sign )) + 
+  geom_point(size = 11, shape = 18) + 
+  scale_color_manual(values=c( "darkgreen","red"))+
+  geom_vline(xintercept = 1, size = 0.5) + 
+  scale_y_discrete(name = "Selected Features") +
+  scale_x_continuous(name="Hazard ratio") +
+  ggtitle("Ovarian: Spatial Features Selected") +
+  theme(legend.position = "none") +
+  theme_classic() +
+  theme(plot.title = element_text(size=20, face="bold.italic", hjust=0.5),
+    axis.title = element_text(size = 20,  face="bold"),
+        axis.text = element_text(size = 17, color="black"),
+        legend.title = element_text(size = 18),
+        legend.text = element_text(size = 18))+
+  labs(color = "")
+
+forest
+
+```
+
+```{r}
+library(rpart)
+
+rpartmodel <- rpart(y_fit ~ k_Tumor, data=filtered_modData_ovarian, method = "class")
+par(mar=c(0,0,0,0))
+plot(rpartmodel)
+text(rpartmodel)
+
+```
+
+```{r}
+
+
+filtered_modData_ovarian_median_tumor <- filtered_modData_ovarian %>%
+  mutate(tumor_group = case_when(
+    k_Tumor < 2611 ~ "Less than 449.3",
+    k_Tumor >= 2611 ~ "Greater than or equal to 449.3"
+  ))
+
+age1<-filtered_modData_ovarian_median_tumor %>%
+  filter(tumor_group=="Greater than or equal to 449.3") 
+
+hist(age1$age_at_diagnosis)
+
+age2<-filtered_modData_ovarian_median_tumor %>%
+  filter(tumor_group=="Less than 449.3") 
+
+hist(age2$age_at_diagnosis)
+
+km_fit_ov_median_tumor <- survfit(
+  Surv(survival_time, death) ~ tumor_group, data=filtered_modData_ovarian_median_tumor)
+
+lab_names_median <- c("Less than 648.1", "Greater than or equal to 648.1")
+
+library(RColorBrewer)
+display.brewer.all()
+
+kap_ov_median_tumor<-ggsurvplot(km_fit_ov_median_tumor, 
+                     size=1.5,
+                     palette = 'viridis',
+                     title = "Ovarian Cancer: Patient Survival by Cancer Cell Clustering", 
+                     risk.table =FALSE, 
+                   pval = TRUE,
+                   legend.title = "Cancer Cell Clustering",
+           legend.labs = lab_names_median, xlab = 'Time (months)', font.x = "bold",
+           font.y="bold",
+           font.title="bold", conf.int = FALSE)
+
+kap_ov_median_tumor
+```
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

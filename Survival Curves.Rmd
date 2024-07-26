@@ -1,0 +1,150 @@
+
+Survival Curves by CK Clustering without all covariates set constant
+```{r}
+filtered_modData_ovarian_2 <- newData_ov %>%
+  mutate(tumor_group = case_when(
+    k_Tumor < ov_CK_quantile_25  ~ "Below 25 Percentile",
+    k_Tumor >= ov_CK_quantile_25 & k_Tumor < ov_CK_quantile_50 ~ "Between 25 and 50th Percentile",
+    k_Tumor >= ov_CK_quantile_50 & k_Tumor < ov_CK_quantile_75 ~ "Between 50 and 75th Percentile",
+    k_Tumor >= ov_CK_quantile_75 ~ "Above 75th Percentile",
+  ))
+
+surv_obj <- Surv(y_new$time, y_new$status)
+surv_obj
+
+x_ov_group <- model.matrix(surv_obj ~ tumor_group, filtered_modData_ovarian_2)
+x_ov_group
+
+y_new <- filtered_modData_ovarian_2 %>%
+  mutate(time=survival_time,
+         status=death) %>%
+  select(time, status) 
+y_new
+
+
+final_fit<-glmnet(x_ov_group, surv_obj, alpha=0.95, lambda=lambda_min_ov, family = "cox", standardize = TRUE)
+log_hr <- predict(final_fit, s = lambda_min_ov, type = "link", newx = x_ov_group)
+cum_hazard <- exp(log_hr)
+surv_prob <- exp(-cum_hazard)
+surv_data <- data.frame(
+  time = y_new$time,
+  status = y_new$status,
+  group = filtered_modData_ovarian_2$tumor_group,
+  surv_prob = surv_prob
+)
+
+surv_data$group <- factor(surv_data$group)
+
+surv_fit <- survfit(Surv(time, status) ~ group, data = surv_data)
+
+plot(surv_fit, col = c("blue", "red", "green", "grey"), lty = 1:4, 
+     xlab = "Time", ylab = "Survival Probability", 
+     main = "Survival Curves by Ovarian Cancer Cell Group")
+legend("topright", legend = levels(surv_data$group), col = c("blue", "red", "green", "grey"), lty = 1:3, cex = 0.8)
+
+
+# Survival Curve plot by tumor cell clustering
+median_Tumor <- median(filtered_modData_ovarian_2$k_Tumor)
+
+filtered_modData_ovarian_2_median_tumor <- filtered_modData_ovarian_2 %>%
+  mutate(tumor_group = case_when(
+    k_Tumor < median_Tumor ~ "Below Median",
+    k_Tumor >= median_Tumor ~ "Above Median",
+  ))
+
+x_ov_CK_group <- model.matrix(surv_obj ~ tumor_group, filtered_modData_ovarian_2_median_tumor)
+x_ov_CK_group
+
+final_fit<-glmnet(x_ov_CK_group, surv_obj, alpha=0.95, lambda=lambda_min_ov, family = "cox", standardize = TRUE)
+
+
+log_hr <- predict(final_fit, s = lambda_min_ov, type = "link", newx = x_ov_CK_group)
+cum_hazard <- exp(log_hr)
+surv_prob <- exp(-cum_hazard)
+surv_data <- data.frame(
+  time = y_new$time,
+  status = y_new$status,
+  group = filtered_modData_ovarian_2_median_tumor$tumor_group,
+  surv_prob = surv_prob
+)
+
+surv_data$group <- factor(surv_data$group)
+
+surv_fit <- survfit(Surv(time, status) ~ group, data = surv_data)
+
+plot(surv_fit, col = c("blue", "red", "green", "grey"), lty = 1:4, 
+     xlab = "Time", ylab = "Survival Probability", 
+     main = "Survival Curves by Ovarian Cancer Cell Clustering")
+legend("topright", legend = levels(surv_data$group), col = c("blue", "red", "green", "grey"), lty = 1:3, cex = 0.8)
+
+```
+
+
+Survival Curves by CK Clustering with all covariates set constant
+```{r}
+ov_CK_quantile_25 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 0.25)
+ov_CK_quantile_50 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 0.50)
+ov_CK_quantile_75 <- quantile(filtered_modData_ovarian$k_Tumor, probs = 0.75)
+ov_CK_quantile_25
+ov_CK_quantile_75
+
+newData_ov <- with(filtered_modData_ovarian, data.frame(k_Tumor = k_Tumor,
+                                                     age = mean(age_at_diagnosis),
+                                                     p_Tumor = mean(p_Tumor),
+                                                     p_Cytotoxic_T = mean(p_Cytotoxic_T),
+                                                     p_Macrophage = mean(p_Macrophage),
+                                                     p_T_Helper = mean(p_T_Helper),
+                                                     k_Cytotoxic_T = mean(k_Cytotoxic_T),
+                                                     k_Macrophage = mean(k_Macrophage),
+                                                     k_T_Helper = mean(k_T_Helper),
+                                                     k_Tumor_Macrophage = mean(k_Tumor_Macrophage),
+                                                     k_Tumor_THelper = mean(k_Tumor_THelper),
+                                                     k_CytotoxicT_Macrophage = mean(k_CytotoxicT_Macrophage),
+                                                     k_CytotoxicT_THelper = mean(k_CytotoxicT_THelper),
+                                                     k_Macrophage_THelper = mean(k_Macrophage_THelper)
+                                                     ))
+
+
+
+newData_ov <- newData_ov %>%
+  mutate(tumor_group = case_when(
+    k_Tumor < ov_CK_quantile_25  ~ "Below 25 Percentile",
+    k_Tumor >= ov_CK_quantile_25 & k_Tumor < ov_CK_quantile_50 ~ "Between 25 and 50th Percentile",
+    k_Tumor >= ov_CK_quantile_50 & k_Tumor < ov_CK_quantile_75 ~ "Between 50 and 75th Percentile",
+    k_Tumor >= ov_CK_quantile_75 ~ "Above 75th Percentile",
+  ))
+
+surv_obj <- Surv(y_new$time, y_new$status)
+surv_obj
+
+
+x_ov_group <- model.matrix(surv_obj ~ tumor_group + k_Tumor + age + p_Tumor + p_Cytotoxic_T + p_Macrophage + p_T_Helper + k_Cytotoxic_T + k_Macrophage + k_T_Helper + k_Tumor_Macrophage + k_Tumor_THelper + k_CytotoxicT_Macrophage + k_CytotoxicT_THelper + k_Macrophage_THelper, newData_ov)
+x_ov_group
+
+y_new <- filtered_modData_ovarian_2 %>%
+  mutate(time=survival_time,
+         status=death) %>%
+  select(time, status) 
+y_new
+
+final_fit<-glmnet(x_ov_group, surv_obj, alpha=0.95, lambda=lambda_min_ov, family = "cox", standardize = TRUE)
+log_hr <- predict(final_fit, s = lambda_min_ov, type = "link", newx = x_ov_group)
+cum_hazard <- exp(log_hr)
+surv_prob <- exp(-cum_hazard)
+surv_data <- data.frame(
+  time = y_new$time,
+  status = y_new$status,
+  group = filtered_modData_ovarian_2$tumor_group,
+  surv_prob = surv_prob
+)
+
+surv_data$group <- factor(surv_data$group)
+
+surv_fit <- survfit(Surv(time, status) ~ group, data = surv_data)
+
+plot(surv_fit, col = c("blue", "red", "green", "grey"), lty = 1:4, 
+     xlab = "Time", ylab = "Survival Probability", 
+     main = "Survival Curves by Age Group")
+legend("topright", legend = levels(surv_data$group), col = c("blue", "red", "green", "grey"), lty = 1:3, cex = 0.8)
+
+```

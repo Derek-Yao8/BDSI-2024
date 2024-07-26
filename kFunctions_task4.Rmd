@@ -1,0 +1,246 @@
+---
+title: "Task 4"
+author: "BDSI Cancer Data Science"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(forcats)
+# library(DIMPLE)
+# line for installing MItools; only need to run once
+# devtools::install_github("junsoukchoi/MItools")
+library(spatstat.explore)
+library(spatstat.geom)
+library(MItools)
+```
+
+```{r}
+ovarianData <- readRDS(
+  "/Users/derekyao/Documents/BDSI/Cancer Data Science/Data/ovarianData.RDS"
+)
+lungData <- readRDS(
+  "/Users/derekyao/Documents/BDSI/Cancer Data Science/Data/lungData.RDS"
+)
+```
+
+Single cell type clustering
+```{r}
+# dataset consisting only of image 1 in the dataset
+lungCells_im1 <- lungData$lung_cells %>% filter(
+  image_id == unique(image_id)[1]
+)
+# plotting image 1
+ggplot(lungCells_im1, aes(x,y,col=pheno))+geom_point()
+
+# point pattern for image 1
+im1_ppp <- spatstat.geom::ppp(
+  x = lungCells_im1$x, y = lungCells_im1$y, 
+  xrange = range(lungCells_im1$x), yrange = range(lungCells_im1$y),
+  marks = factor(lungCells_im1$pheno)
+)
+```
+
+```{r}
+kEst_cd19 <- spatstat.explore::Kest(X = spatstat.geom::split.ppp(im1_ppp)$CD19, correction = "isotropic")
+plot(kEst_cd19)
+# CD19 is clustered
+```
+
+Multitype
+```{r}
+kCross_ck_cd19 <- MItools::Kcross(X = im1_ppp, i = "CD19", j = "CK", correction = "isotropic")
+plot(kCross_ck_cd19)
+# anti-clustering, repulsive between the two cell types since there is barely overlap between the two
+kCross_cd4_cd19 <- MItools::Kcross(X = im1_ppp, i = "CD19", j = "CD4", correction = "isotropic")
+plot(kCross_cd4_cd19)
+# clustering between the two cell types, lots of overlap between the two cell types
+# they actually only appear together
+
+```
+
+Extracting Variables for Analysis
+```{r}
+startT <- Sys.time()
+# store dataset in new object so I can add to it while retaining original
+# format/structure of metadata
+lungMeta <- lungData$lung_metadata
+
+# add image-level prevalence of CK and CD19 to metadata
+lungMeta <- lungMeta %>% left_join(
+  lungData$lung_cells %>% group_by(image_id) %>% 
+    dplyr::summarize(
+      totalCell = n(),
+      p_CK = sum(pheno == "CK")/n(),
+      p_CD19 = sum(pheno == "CD19")/n()
+    ), by = "image_id"
+)
+
+# create variables for k function values of each image
+lungMeta$k_CK <- NA # k function values for CK
+lungMeta$k_CD19 <- NA # k function values for CD19
+lungMeta$k_CK_CD19 <- NA # k cross values for CK and CD19
+
+# for loop to iterate through each image in the metadata
+for(i in 1:nrow(lungMeta)){
+  # temporary dataset for image "i" in the ith iteration of this "for" loop
+  tempData <- lungData$lung_cells %>% filter(
+    image_id == lungMeta$image_id[i]
+  )
+  
+  # point pattern object for all of image i
+  pppObj <- spatstat.geom::ppp(
+    x = tempData$x, y = tempData$y, 
+    xrange = range(tempData$x), yrange = range(tempData$y),
+    marks = factor(tempData$pheno)
+  )
+  
+  if(lungMeta$p_CK[i] > 0){
+    # k function estimated for image i tumor cells using isotropic correction
+    kEstCK_temp <- spatstat.explore::Kest(
+      X = spatstat.geom::split.ppp(x = pppObj)$CK, correction = "isotropic"
+    )
+    # get difference between estimate and theoretical value at radius of 40 microns
+    lungMeta$k_CK[i] <- (kEstCK_temp$iso - kEstCK_temp$theo)[
+      which.min(abs(kEstCK_temp$r - 40))
+    ]
+  }
+  else{
+    # if there are no tumor cells, record NA for this image's k function
+    lungMeta$k_CK[i] <- NA
+  }
+  
+  if(lungMeta$p_CD19[i] > 0){
+    # k function estimated for image i B cells using isotropic correction
+    kEstCD19_temp <- spatstat.explore::Kest(
+      X = spatstat.geom::split.ppp(x = pppObj)$CD19, correction = "isotropic"
+    )
+    # get difference between estimate and theoretical value at radius of 40 microns
+    lungMeta$k_CD19[i] <- (kEstCD19_temp$iso - kEstCD19_temp$theo)[
+      which.min(abs(kEstCD19_temp$r - 40))
+    ]
+  }
+  else{
+    lungMeta$k_CD19[i] <- NA
+  }
+  
+  if(lungMeta$p_CD19[i] > 0 & lungMeta$p_CK[i] > 0){
+    # k function estimated for image i B cells using isotropic correction
+    kCross_temp <- MItools::Kcross(
+      X = pppObj , i = "CK", j = "CD19", correction = "isotropic"
+    )
+    # get difference between estimate and theoretical value at radius of 40 microns
+    lungMeta$k_CK_CD19[i] <- (kCross_temp$iso - kCross_temp$theo)[
+      which.min(abs(kCross_temp$r - 40))
+    ]
+  }
+  else{
+    # if there are no CD19 cells or no tumor cells, record cross function value as NA
+    lungMeta$k_CK_CD19[i] <- NA
+  }
+}
+Sys.time() - startT # 27.5 seconds
+```
+
+View new metadata
+```{r}
+# look at first 10 values of data and summary of each column
+head(lungMeta, 10)
+summary(lungMeta)
+# k function for CD19 has 29 NAs, presumably 29 images have zero prevalence
+
+sum(lungMeta$p_CD19 == 0)
+# 17 NAs. Which images have NA for k function but nonzero prevalence?
+lungMeta %>% filter(
+  lungMeta$p_CD19 > 0, is.na(lungMeta$k_CD19)
+)
+# these images have low prevalence
+errorImages <- unlist(
+  lungMeta %>% filter(
+    lungMeta$p_CD19 > 0, is.na(lungMeta$k_CD19)
+  ) %>% select(image_id)
+)
+lungData$lung_cells %>% filter(image_id %in% errorImages) %>% 
+  group_by(image_id) %>% summarize(nCD19 = sum(pheno == "CD19"))
+# they all have a single CD19 
+
+tempData <- lungData$lung_cells %>% filter(
+  image_id == errorImages[1]
+)
+ggplot(tempData %>% filter(pheno %in% c("CK", "CD19")), aes(x,y,col=pheno)) + 
+  geom_point()
+# only one CD19 point; impossible to quantify "clustering" of one point
+  
+# point pattern object for all image i
+pppObj <- spatstat.geom::ppp(
+  x = tempData$x, y = tempData$y, 
+  xrange = range(tempData$x), yrange = range(tempData$y),
+  marks = factor(tempData$pheno)
+)
+
+kEstCD19_temp <- spatstat.explore::Kest(
+  X = spatstat.geom::split.ppp(x = pppObj)$CD19#, correction = "isotropic"
+)
+plot(kEstCD19_temp)
+# some images may not be able to estimate K function
+kEstCD19_temp$border
+```
+
+Above analysis shows that images with few cells may lead to extreme outlying values.
+Small sample size means estimate of k function may be poor. Analyzing 
+extreme values/extreme residuals may be important in your models.
+
+Always important to carefully check the output of the code you ran to make 
+sure it did what you were expecting it to do.
+
+```{r}
+# create variable indicating whether the image is the image with the most cells
+# for that patient
+lungMeta <- lungMeta %>% group_by(patient_id) %>% mutate(
+  imageMax = ifelse(totalCell == max(totalCell) , 1, 0)
+)
+
+# modData (model data) is the lungMetadata subsetted to complete cases of
+# the covariates i plan to include and the outcome of the model
+# I also only include imageMax == 1, a single image for each patient that has
+# the most number of cells among images of that patient
+modData <- lungMeta[
+  complete.cases(
+    lungMeta[ , c("gender", "age_at_diagnosis", "stage_numeric", "p_CK", "p_CD19", "k_CK", "k_CD19", "k_CK_CD19", "survival_days")]
+  ) & lungMeta$imageMax == 1 , 
+]
+# 147 patient's images
+
+survLM_patient <- lm(
+  survival_days ~ gender + age_at_diagnosis + as.factor(stage_numeric), 
+  data = modData
+)
+survLM_spatial <- lm(
+  survival_days ~ gender + age_at_diagnosis + as.factor(stage_numeric) +
+    p_CK + p_CD19 + k_CK + k_CD19 + k_CK_CD19, data = modData
+)
+summary(survLM_spatial)
+# no statistical significance
+anova(survLM_patient, survLM_spatial)
+# spatial variables do not significantly improve the fit of the model
+# model may be specified incorrectly; we are not using survival analysis
+plot(survLM_spatial)
+```
+
+The above is one example of how to include the spatial statistics that you create
+in a model. This is sometimes referred to as "feature extraction". 
+
+I am choosing a single image per patient, which is the image with the
+most cells. You could use other criteria.
+
+I also use the k function values of that image. Another option is to summarize
+the values for all 5 images into a single number. Mean, median, variance, etc.
+You could also include the mean and variance of prevalences. Any method of 
+extracting summary statistics from the images to model on the patient level is 
+a valid feature extraction method.

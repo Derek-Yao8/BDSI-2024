@@ -1,0 +1,371 @@
+---
+title: "CDS Exploratory"
+output: html_document
+date: "2024-06-20"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(forcats)
+#library(DIMPLE)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r}
+ovarianData <- readRDS(
+  "/Users/derekyao/Documents/BDSI/Cancer Data Science/Data/ovarianData.RDS"
+)
+lungData <- readRDS(
+  "/Users/derekyao/Documents/BDSI/Cancer Data Science/Data/lungData.RDS"
+)
+
+View(ovarianData$ovarian_cells)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r}
+median(unlist(
+  lungData$lung_metadata %>% dplyr::group_by(patient_id) %>% dplyr::summarise(
+    survival_days = dplyr::first(survival_days)
+  ) %>% select(survival_time)
+))
+median(unlist(
+  lungData$lung_metadata %>% dplyr::group_by(patient_id) %>% dplyr::summarise(
+    survival_days = dplyr::first(survival_days)
+  ) %>% select(survival_time)
+))/365
+
+```
+
+
+Looking at survival days of lung cancer data set by gender/sex
+
+```{r}
+boxplot(survival_days ~ gender, lungData$lung_metadata)
+```
+
+Plotting various images of cell intensities
+
+```{r}
+summary(lungData$lung_cells$x)
+
+ggplot(lungData$lung_cells %>%
+  filter(
+    image_id == unique(lungData$lung_cells$image_id)[10]
+  ),
+  aes(x,y, col = pheno, title = "Plot")
+) +
+  geom_point()
+
+ggplot(lungData$lung_cells %>%
+  filter(
+    image_id == unique(lungData$lung_cells$image_id)[20]
+  ),
+  aes(x,y, col = pheno, title = "Plot")
+) +
+  geom_point()
+
+
+ggplot(lungData$lung_cells %>%
+  filter(
+    image_id == unique(lungData$lung_cells$image_id)[100]
+  ),
+  aes(x,y, col = pheno, title = "Plot")
+) +
+  geom_point()
+
+ggplot(
+  lungData$lung_cells %>% filter(
+    slide_id == unique(lungData$lung_cells$slide_id)[1], image_id == unique(lungData$lung_cells$image_id)[3]
+  ),
+  aes(x,y, col = pheno, title = "Plot")
+) +
+  geom_point()
+  
+```
+
+Look at images from ovarian cancer data set
+```{r}
+ggplot(
+  ovarianData$ovarian_cells %>% filter(
+    sample_id == unique(ovarianData$ovarian_cells$sample_id)[10]
+  ),
+  aes(x,y, col = pheno)
+) +
+  geom_point()
+
+ggplot(
+  ovarianData$ovarian_cells %>% filter(
+    sample_id == unique(ovarianData$ovarian_cells$sample_id)[20]
+  ),
+  aes(x,y, col = pheno)
+) +
+  geom_point()
+
+ggplot(
+  ovarianData$ovarian_cells %>% filter(
+    sample_id == unique(ovarianData$ovarian_cells$sample_id)[100]
+  ),
+  aes(x,y, col = pheno)
+) +
+  geom_point()
+```
+
+Look at cause of death in lung cancer data set
+```{r}
+plot(ovarianData$ovarian_metadata$BRCA_mutation, ovarianData$ovarian_metadata$survival_time)
+
+plot(ovarianData$ovarian_metadata$treatment_effect, ovarianData$ovarian_metadata$survival_time)
+
+```
+
+
+```{r}
+combine_ovarian <- ovarianData$ovarian_metadata %>%
+  left_join(ovarianData$ovarian_cells, by = 'sample_id')
+
+summary(combine_ovarian)
+
+combine_ovarian %>%
+  group_by(grade) %>%
+  summarize(mean_survival_time = mean(survival_time))
+
+combine_ovarian %>%
+  group_by(parpi_inhibitor) %>%
+  summarize(mean_survival_time = mean(survival_time))
+
+combine_ovarian %>%
+  group_by(BRCA_mutation) %>%
+  summarize(mean_survival_time = mean(survival_time))
+
+combine_ovarian %>%
+  group_by(treatment_effect) %>%
+  summarize(mean_survival_time = mean(survival_time))
+```
+Looking at random sample images of dead and alive patients and comparing sample images
+
+```{r}
+ovarian_dead <- combine_ovarian %>%
+  filter(death == 1)
+
+ovarian_alive <- combine_ovarian %>%
+  filter(death == 0)
+
+set.seed(2)
+
+ggplot(
+  ovarian_dead %>% filter(
+    sample_id == sample(sample_id,1)
+  ),
+  aes(x,y, col = pheno)
+) +
+  geom_point()
+
+ggplot(
+  ovarian_alive %>% filter(
+    sample_id == sample(sample_id,1)
+  ),
+  aes(x,y, col = pheno)
+) +
+  geom_point()
+
+```
+
+Comparing sample images between those with 'high' survival time and those with 'low' survival time
+```{r}
+combine_ovarian %>%
+  summary(survival_time)
+
+ovarian_high_survival <- combine_ovarian %>%
+  filter(survival_time > 57.77)
+
+ovarian_low_survival <- combine_ovarian %>%
+  filter(survival_time <= 57.77)
+
+set.seed(50)
+
+ggplot(
+  ovarian_low_survival %>% filter(
+    sample_id == sample(sample_id,1)
+  ),
+  aes(x,y, col = pheno)
+) +
+  geom_point()
+
+ggplot(
+  ovarian_high_survival %>% filter(
+    sample_id == sample(sample_id,1)
+  ),
+  aes(x,y, col = pheno)
+) +
+  geom_point()
+
+ggplot(
+  combine_ovarian %>% filter(death == 0), 
+  aes(age_at_diagnosis, survival_time)) +
+  geom_point()
+
+ggplot(
+  combine_ovarian %>% filter(death == 1), 
+  aes(age_at_diagnosis, survival_time)) +
+  geom_point()
+
+ggplot(
+  combine_ovarian %>% filter(death == 0), 
+  aes(stage, survival_time)) +
+  geom_point()
+
+```
+
+Comparing images between those with parpi inhibitor and those without
+```{r}
+ovarian_parpi <- combine_ovarian %>%
+  filter(parpi_inhibitor == "Y")
+
+ovarian_no_parpi <- combine_ovarian %>%
+  filter(parpi_inhibitor == "N")
+
+ggplot(
+  ovarian_parpi %>% filter(
+    sample_id == sample(sample_id,1)
+  ),
+  aes(x,y, col = pheno)
+) +
+  geom_point()
+
+ggplot(
+  ovarian_no_parpi %>% filter(
+    sample_id == sample(sample_id,1)
+  ),
+  aes(x,y, col = pheno)
+) +
+  geom_point()
+```
+
+```{r}
+lungDatacombined <- lungData$lung_cells %>% left_join(lungData$lung_metadata, 
+                                                      by = 'image_id')
+  combine_ovarian <- ovarianData$ovarian_metadata %>%
+  left_join(ovarianData$ovarian_cells, by = 'sample_id')
+```
+
+
+Working with combined lung data
+```{r}
+summary(lungDatacombined)
+##Median survival days is 2600 days, mean survival days is 2286 days
+lung_high_survival <- lungDatacombined %>% filter(survival_days >= 2600)
+lung_low_survival <- lungDatacombined %>% filter(survival_days < 2600)
+
+
+```
+
+Comparing images between low and high survival days in lung data
+```{r}
+ggplot(
+  lung_high_survival %>% filter(image_id == sample(image_id,1)
+                                ),
+  aes(x,y, col=pheno)
+) + 
+  geom_point() +
+  ggtitle("High Survival Days Lung Sample Image")
+
+ggplot(
+  lung_low_survival %>% filter(image_id == sample(image_id,1)
+                                ),
+  aes(x,y, col=pheno)
+) + 
+  geom_point() +
+  ggtitle("Low Survival Days Lung Sample Image")
+
+```
+
+Linear Regression Model of survival time for ovarian data
+```{r}
+#Regressing survival time onto age at diagnosis
+ovar_lin_model_age <- lm(survival_time ~ age_at_diagnosis, combine_ovarian)
+summary(ovar_lin_model_age)
+
+plot(ovar_lin_model_age)
+cooks.distance(ovar_lin_model_age)
+cooks.distance(ovar_lin_model_age)[which.max(cooks.distance(ovar_lin_model_age))]
+plot(ovar_lin_model_age,which=4)
+
+## Results show that for every 1 unit increase in age at diagnosis, survival time 
+## decreased by about 0.17 days
+## Cook's distance shows there don't seem to be any outliers as none reached 1,
+## however one point has a much higher Cook's distance than others
+## Diagnostic plots also showed no violation of heterscedasticity 
+## However there is a violation of the normality of residuals
+## Linear regression is likely not the best model for this data
+
+ovar_lin_model_BRCA <- lm(survival_time ~ BRCA_mutation, combine_ovarian)
+summary(ovar_lin_model_BRCA)
+
+plot(ovar_lin_model_BRCA)
+cooks.distance(ovar_lin_model_BRCA)
+cooks.distance(ovar_lin_model_BRCA)[which.max(cooks.distance(ovar_lin_model_BRCA))]
+plot(ovar_lin_model_BRCA,which=4)
+
+## Results show that those with BRCA mutation are associated with a decrease in 
+## survival time by 3.66 days
+## It does not seem heteroscedasticity of residuals is violated
+## Normality of residuals seems to be violated
+## Linear regression is likely not the best model for this data
+
+
+# Regressing survival time over parpi inhibitor status
+ovar_lin_model_parpi <- lm(survival_time ~ parpi_inhibitor, combine_ovarian)
+summary(ovar_lin_model_parpi)
+
+plot(ovar_lin_model_parpi)
+cooks.distance(ovar_lin_model_parpi)
+cooks.distance(ovar_lin_model_parpi)[which.max(cooks.distance(ovar_lin_model_parpi))]
+plot(ovar_lin_model_parpi,which=4)
+
+## Results show that those with a PARPI inhibitor 
+## have about 6.02 fewer days in survival time
+## Normality of residuals is vioalted so this is likely not a good model
+
+# Regressin survival time over all three previous covariates
+ovar_lin_model_combine <- lm(survival_time ~ parpi_inhibitor + age_at_diagnosis + BRCA_mutation, combine_ovarian)
+summary(ovar_lin_model_combine)
+
+plot(ovar_lin_model_combine)
+cooks.distance(ovar_lin_model_combine)
+cooks.distance(ovar_lin_model_combine)[which.max(cooks.distance(ovar_lin_model_combine))]
+plot(ovar_lin_model_combine,which=4)
+
+
+
+## Results show that holding all else constant, those with PARPI inhibitors 
+
+```
+
+Linear Regression of lung data
+```{r}
+lungDatacombined %>%
+  group_by(slide_id, pheno) %>%
+  summarize(total = n()) %>%
+  mutate(
+    prop = total/sum(total)
+    )
+
+
+```
+

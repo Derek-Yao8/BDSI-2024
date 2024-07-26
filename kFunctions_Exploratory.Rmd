@@ -1,0 +1,438 @@
+```{r}
+library(dplyr)
+library(ggplot2)
+library(forcats)
+# library(DIMPLE)
+# line for installing MItools; only need to run once
+# devtools::install_github("junsoukchoi/MItools", force = TRUE)
+library(spatstat.explore)
+library(spatstat.geom)
+library(MItools)
+```
+
+```{r}
+ovarianData <- readRDS(
+  "/Users/derekyao/Documents/BDSI/Cancer Data Science/Data/ovarianData.RDS"
+)
+lungData <- readRDS(
+  "/Users/derekyao/Documents/BDSI/Cancer Data Science/Data/lungData.RDS"
+)
+```
+
+Single cell type clustering
+```{r}
+# dataset consisting only of image 10 in the dataset
+lungCells_im1 <- lungData$lung_cells %>% filter(
+  image_id == unique(image_id)[100]
+)
+# plotting image 10
+ggplot(lungCells_im1, aes(x,y,col=pheno))+geom_point()
+
+# point pattern for image 10
+im1_ppp <- spatstat.geom::ppp(
+  x = lungCells_im1$x, y = lungCells_im1$y, 
+  xrange = range(lungCells_im1$x), yrange = range(lungCells_im1$y),
+  marks = factor(lungCells_im1$pheno)
+)
+```
+Using MItools instead of spatstat
+```{r}
+load(url("https://github.com/julia-wrobel/MI_tutorial/raw/main/Data/lung.RDA"))
+
+# randomly select a lung cancer image and define cell types
+library(dplyr)
+subj_df = filter(lung_df, image_id == "#73 6-333-711_[44841,18646].im3")
+subj_df = subj_df %>%
+   mutate(phenotype = case_when(
+      phenotype_cd19 == "CD19+" ~ "CD19+ B-cell",
+      phenotype_cd14 == "CD14+" ~ "CD14+ cell",
+      phenotype_cd8 == "CD8+" ~ "CD8+ T-cell",
+      phenotype_cd4 == "CD4+" ~ "CD4+ T-cell",
+      phenotype_ck  == "CK+" ~ "CK+ cancer cell",
+      TRUE ~ "Other"
+   ))
+
+# convert the selected lung cancer image into the object of class "ppp" representing a multitype point pattern
+pp_lung = multitype.pp(subj_df$x, subj_df$y, subj_df$phenotype)
+
+plot(pp_lung, main = "Lung cancer image", cols = 2 : 7)
+```
+
+
+Look at clustering
+```{r}
+kEst_cd19 <- spatstat.explore::Kest(X = spatstat.geom::split.ppp(im1_ppp)$CD19, correction = "isotropic")
+plot(kEst_cd19)
+# CD19 is clustered here
+
+gEst_cd19 <- MItools::Gest(pp_lung, "CD19+ B-cell", correction = "all")
+plot(gEst_cd19)
+
+kEst_cd19 <- MItools::Kest(pp_lung, "CD19+ B-cell", correction = 'all')
+plot(kEst_cd19)
+
+lEst_cd19 <- MItools::Lest(pp_lung, "CD19+ B-cell", correction = 'iso')
+plot(lEst_cd19)
+
+
+
+#All plots show clustering of CD19
+
+```
+
+Clustering of CD14
+```{r}
+gEst_cd14 <- MItools::Gest(pp_lung, "CD14+ cell", correction = 'all')
+plot(gEst_cd14)
+
+# This shows clustering of CD14
+
+kEst_cd14 <- MItools::Kest(pp_lung, "CD14+ cell", correction = 'iso')
+plot(kEst_cd14)
+
+# This also somewhat shows clustering of CD14, but very close to theoretical line
+
+lEst_cd14 <- MItools::Lest(pp_lung, "CD14+ cell", correction = 'iso')
+plot(lEst_cd14)
+
+# This also somehwat shows clustering of CD14, but very close to theoretical line
+# In conclusion, these plots show that the cells may be random with minimal clustering
+
+```
+CD8 Clustering
+```{r}
+gEst_cd8 <- MItools::Gest(pp_lung, "CD8+ T-cell", correction = "all")
+plot(gEst_cd8)
+
+kEst_cd8 <- MItools::Kest(pp_lung, "CD8+ T-cell", correction = 'iso')
+plot(kEst_cd8)
+
+lEst_cd8 <- MItools::Lest(pp_lung, "CD8+ T-cell", correction = 'iso')
+plot(lEst_cd8)
+
+# These plots show somewhat clustering of CD8, but close to random
+```
+
+CD4 Clustering
+```{r}
+gEst_cd4 <- MItools::Gest(pp_lung, "CD4+ T-cell", correction = "all")
+plot(gEst_cd4)
+
+kEst_cd4 <- MItools::Kest(pp_lung, "CD4+ T-cell", correction = 'iso')
+plot(kEst_cd4)
+
+lEst_cd4 <- MItools::Lest(pp_lung, "CD4+ T-cell", correction = 'iso')
+plot(lEst_cd4)
+
+# These plots also show somewhat clustering of CD4
+```
+
+CK Clustering (doesn't work?)
+```{r}
+gEst_ck <- MItools::Gest(pp_lung, "CK cancer cell", correction = "all")
+plot(gEst_ck)
+
+kEst_ck <- MItools::Kest(pp_lung, "CK cancer cell", correction = 'iso')
+plot(kEst_ck)
+
+lEst_ck <- MItools::Lest(pp_lung, "CK cancer cell", correction = 'iso')
+plot(lEst_ck)
+```
+
+Colocalization between CK and CD14 (in-progress)
+```{r}
+kCross_cd19_cd14 <- MItools::Kcross(pp_lung, i = "CK+ cancer cell", j = "CD14+ cell", correction = 'iso')
+plot(kCross_cd19_cd14)
+
+gCross_cd19_cd14 <- MItools::Gcross(pp_lung, "CK+ cancer cell", "CD14+ cell", correction = 'all')
+plot(gCross_cd19_cd14)
+
+lCross_cd19_cd14 <- MItools::Lcross(pp_lung, "CK+ cancer cell", "CD14+ cell", correction = 'iso')
+plot(lCross_cd19_cd14)
+
+pcfCross_cd19_cd14 <- MItools::pcfcross(pp_lung, "CK+ cancer cell", "CD14+ cell", correction = 'iso')
+plot(pcfCross_cd19_cd14)
+
+envelope_K = permute.envelope(pp_lung, Kcross, funargs = list(i = "CK+ cancer cell", j = "CD14+ cell", correction = "isotropic"))
+
+plot(envelope_K, main = "Permutation envelopes of the K-cross function")
+K = Kcross(pp_lung, i = "CK+ cancer cell", j = "CD14+ cell", correction = "isotropic")
+lines(K$r, K$theo, lty = 2, col = "blue")
+
+# the G Cross function shows regular point pattern between CK and CD14, as do other plots mostly
+```
+
+Extracting variables for analysis (CD8 and CK)
+```{r}
+startT <- Sys.time()
+# store dataset in new object so I can add to it while retaining original
+# format/structure of metadata
+lungMeta <- lungData$lung_metadata
+
+# add image-level prevalence of CK and CD19 to metadata
+lungMeta_CD8 <- lungMeta %>% left_join(
+  lungData$lung_cells %>% group_by(image_id) %>% 
+    dplyr::summarize(
+      totalCell = n(),
+      p_CK = sum(pheno == "CK")/n(),
+      p_CD8 = sum(pheno == "CD8")/n()
+    ), by = "image_id"
+)
+
+# create variables for k function values of each image
+lungMeta_CD8$k_CK <- NA # k function values for CK
+lungMeta_CD8$k_CD8 <- NA # k function values for CD8
+lungMeta_CD8$k_CK_CD8 <- NA # k cross values for CK and CD8
+
+# for loop to iterate through each image in the metadata
+for(i in 1:nrow(lungMeta_CD8)){
+  # temporary dataset for image "i" in the ith iteration of this "for" loop
+  tempData <- lungData$lung_cells %>% filter(
+    image_id == lungMeta_CD8$image_id[i]
+  )
+  
+  # point pattern object for all of image i
+  pppObj <- MItools::multitype.pp(
+    x = tempData$x, y = tempData$y, 
+    marks = factor(tempData$pheno)
+  )
+  
+  if(lungMeta_CD8$p_CK[i] > 0){
+    # k function estimated for image i tumor cells using isotropic correction
+    kEstCK_temp <- MItools::permute.envelope(pppObj, Kest, funargs = list(i = "CK", correction = "isotropic"))
+    # Use the below code to get the theoretical line of K function, compare to above code in MItools
+    #   spatstat.explore::Kest(
+    #   X = spatstat.geom::split.ppp(x = pppObj)$CK, correction = "isotropic"
+    # )
+    # get difference between estimate and theoretical value at radius of 40 microns
+    lungMeta_CD8$k_CK[i] <- (kEstCK_temp$obs - kEstCK_temp$mmean)[
+      which.min(abs(kEstCK_temp$r - 40))
+    ]
+  }
+  else{
+    # if there are no tumor cells, record NA for this image's k function
+    lungMeta_CD8$k_CK[i] <- NA
+  }
+  
+  if(lungMeta_CD8$p_CD8[i] > 0){
+    # k function estimated for image i B cells using isotropic correction
+    # kEstCD19_temp <- spatstat.explore::Kest(
+    #   X = spatstat.geom::split.ppp(x = pppObj)$CD19, correction = "isotropic"
+    # )
+    kEstCD8_temp <- MItools::permute.envelope(pppObj, fun = Kest, funargs = list(i = "CD8", correction = "isotropic"))
+    # get difference between estimate and theoretical value at radius of 40 microns
+    lungMeta_CD8$k_CD8[i] <- (kEstCD8_temp$obs - kEstCD8_temp$mmean)[
+      which.min(abs(kEstCD8_temp$r - 40))
+    ]
+  }
+  else{
+    lungMeta_CD8$k_CD8[i] <- NA
+  }
+  
+  if(lungMeta_CD8$p_CD8[i] > 0 & lungMeta_CD8$p_CK[i] > 0){
+    # k function estimated for image i B cells using isotropic correction
+    kCross_temp <- MItools::permute.envelope(pppObj, fun = Kcross, funargs = list(i = "CK", j = "CD8", correction = "isotropic"))
+    # get difference between estimate and theoretical value at radius of 40 microns
+    lungMeta_CD8$k_CK_CD8[i] <- (kCross_temp$obs - kCross_temp$mmean)[
+      which.min(abs(kCross_temp$r - 40))
+    ]
+  }
+  else{
+    # if there are no CD19 cells or no tumor cells, record cross function value as NA
+    lungMeta_CD8$k_CK_CD8[i] <- NA
+  }
+}
+Sys.time() - startT # 27.5 seconds
+```
+
+
+```{r}
+startT <- Sys.time()
+# store dataset in new object so I can add to it while retaining original
+# format/structure of metadata
+lungMeta <- lungData$lung_metadata
+
+# add image-level prevalence of CK and CD19 to metadata
+lungMeta <- lungMeta %>% left_join(
+  lungData$lung_cells %>% group_by(image_id) %>% 
+    dplyr::summarize(
+      totalCell = n(),
+      p_CK = sum(pheno == "CK")/n(),
+      p_CD19 = sum(pheno == "CD19")/n()
+    ), by = "image_id"
+)
+
+# create variables for k function values of each image
+lungMeta$k_CK <- NA # k function values for CK
+lungMeta$k_CD19 <- NA # k function values for CD19
+lungMeta$k_CK_CD19 <- NA # k cross values for CK and CD19
+
+# for loop to iterate through each image in the metadata
+for(i in 1:nrow(lungMeta)){
+  # temporary dataset for image "i" in the ith iteration of this "for" loop
+  tempData <- lungData$lung_cells %>% filter(
+    image_id == lungMeta$image_id[i]
+  )
+  
+  # point pattern object for all of image i
+  pppObj <- spatstat.geom::ppp(
+    x = tempData$x, y = tempData$y, 
+    xrange = range(tempData$x), yrange = range(tempData$y),
+    marks = factor(tempData$pheno)
+  )
+  
+  if(lungMeta$p_CK[i] > 0){
+    # k function estimated for image i tumor cells using isotropic correction
+    kEstCK_temp <- spatstat.explore::Kest(
+      X = spatstat.geom::split.ppp(x = pppObj)$CK, correction = "isotropic"
+    )
+    # get difference between estimate and theoretical value at radius of 40 microns
+    lungMeta$k_CK[i] <- (kEstCK_temp$iso - kEstCK_temp$theo)[
+      which.min(abs(kEstCK_temp$r - 40))
+    ]
+  }
+  else{
+    # if there are no tumor cells, record NA for this image's k function
+    lungMeta$k_CK[i] <- NA
+  }
+  
+  if(lungMeta$p_CD19[i] > 0){
+    # k function estimated for image i B cells using isotropic correction
+    kEstCD19_temp <- spatstat.explore::Kest(
+      X = spatstat.geom::split.ppp(x = pppObj)$CD19, correction = "isotropic"
+    )
+    # get difference between estimate and theoretical value at radius of 40 microns
+    lungMeta$k_CD19[i] <- (kEstCD19_temp$iso - kEstCD19_temp$theo)[
+      which.min(abs(kEstCD19_temp$r - 40))
+    ]
+  }
+  else{
+    lungMeta$k_CD19[i] <- NA
+  }
+  
+  if(lungMeta$p_CD19[i] > 0 & lungMeta$p_CK[i] > 0){
+    # k function estimated for image i B cells using isotropic correction
+    kCross_temp <- MItools::Kcross(
+      X = pppObj , i = "CK", j = "CD19", correction = "isotropic"
+    )
+    # get difference between estimate and theoretical value at radius of 40 microns
+    lungMeta$k_CK_CD19[i] <- (kCross_temp$iso - kCross_temp$theo)[
+      which.min(abs(kCross_temp$r - 40))
+    ]
+  }
+  else{
+    # if there are no CD19 cells or no tumor cells, record cross function value as NA
+    lungMeta$k_CK_CD19[i] <- NA
+  }
+}
+Sys.time() - startT # 27.5 seconds
+```
+
+
+```{r}
+save('lungMeta_CD8', file='/Users/derekyao/Documents/BDSI/Cancer Data Science/R Code/lungMeta_CD8.RDS')
+
+# create variable indicating whether the image is the image with the most cells
+# for that patient
+lungMeta <- lungMeta %>% group_by(patient_id) %>% mutate(
+  imageMax = ifelse(totalCell == max(totalCell) , 1, 0)
+)
+
+
+lungMeta_means <- lungMeta %>% 
+  group_by(patient_id) %>%
+  mutate(mean_p_CK = mean(p_CK), mean_p_CD19 = mean(p_CD19), mean_k_CK = mean(k_CK), mean_k_CD19 = mean(k_CD19), mean_k_CK_CD19 = mean(k_CK_CD19), mean_survival_days = mean(survival_days))
+
+summary(lungMeta_means)
+# modData (model data) is the lungMetadata subsetted to complete cases of
+# the covariates i plan to include and the outcome of the model
+# I also only include imageMax == 1, a single image for each patient that has
+# the most number of cells among images of that patient
+modData_CD8 <- lungMeta_means[
+  complete.cases(
+    lungMeta_means[ , c("gender", "age_at_diagnosis", "stage_numeric", "mean_p_CK", "mean_p_CD19", "mean_k_CK", "mean_k_CD19", "mean_k_CK_CD19", "mean_survival_days")]
+  ), 
+]
+# 147 patient's images
+
+survLM_patient <- lm(
+  survival_days ~ gender + age_at_diagnosis + as.factor(stage_numeric), 
+  data = modData
+)
+survLM_spatial <- lm(
+  survival_days ~ gender + age_at_diagnosis + as.factor(stage_numeric) +
+    p_CK + p_CD19 + k_CK + k_CD19 + k_CK_CD19, data = modData
+)
+summary(survLM_spatial)
+
+# Many statistical significances, between intercept, gender, age at diagnosis,
+# numeric stages 3 and 4, proportion of CK and proportion of CD19
+# Those with higher proportion of CK and proportion of CD19 have significantly lower
+# survival time
+
+anova(survLM_patient, survLM_spatial)
+
+# The spatial variables do significantly improve the model fit
+plot(survLM_spatial)
+
+
+# no statistical significance
+anova(survLM_patient, survLM_spatial)
+# spatial variables do not significantly improve the fit of the model
+# model may be specified incorrectly; we are not using survival analysis
+plot(survLM_spatial)
+
+cooks.distance(survLM_spatial)
+cooks.distance(survLM_spatial)[which.max(cooks.distance(survLM_spatial))]
+plot(survLM_spatial,which=4)
+
+# There is statistical significance among the proportions of CK and CD19, lung caner stages 3 and 4, and gender and age at diagnosis
+# Cook's distance shows that there are no obvious outliers
+
+```
+
+
+```{r}
+survLM_patient_glm <- glm(survival_status ~ gender + age_at_diagnosis + as.factor(stage_numeric), data = modData)
+
+survLM_spatial_glm <- glm(survival_status ~ gender + age_at_diagnosis + as.factor(stage_numeric) + p_CK + p_CD19 + k_CK + k_CD19 + k_CK_CD19, data = modData)
+
+summary(survLM_spatial_glm)
+anova(survLM_patient_glm, survLM_spatial_glm)
+
+plot(survLM_spatial_glm)
+
+
+
+lungMeta_CD8_2 <- lungMeta_CD8 %>% group_by(patient_id) %>% mutate(
+  imageMax = ifelse(totalCell == max(totalCell) , 1, 0)
+)
+
+# modData (model data) is the lungMetadata subsetted to complete cases of
+# the covariates i plan to include and the outcome of the model
+# I also only include imageMax == 1, a single image for each patient that has
+# the most number of cells among images of that patient
+modData_CD8 <- lungMeta_CD8_2[
+  complete.cases(
+    lungMeta_CD8_2[ , c("gender", "age_at_diagnosis", "stage_numeric", "p_CK", "p_CD8", "k_CK", "k_CD8", "k_CK_CD8", "survival_days")]
+  ) & lungMeta_CD8_2$imageMax == 1 , 
+]
+# 147 patient's images
+
+survLM_patient <- lm(
+  survival_days ~ gender + age_at_diagnosis + as.factor(stage_numeric), 
+  data = modData_CD8
+)
+survLM_spatial <- lm(
+  survival_days ~ gender + age_at_diagnosis + as.factor(stage_numeric) +
+    p_CK + p_CD8 + k_CK + k_CD8 + k_CK_CD8, data = modData_CD8
+)
+summary(survLM_spatial)
+
+anova(survLM_patient, survLM_spatial)
+
+plot(survLM_spatial)
+
+# F-statistic is non-significant, only significant age at diagnosis
+```
+

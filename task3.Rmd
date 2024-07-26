@@ -1,0 +1,213 @@
+---
+title: "Task 3"
+author: "BDSI Cancer Data Science"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(forcats)
+# library(DIMPLE)
+```
+
+
+## Loading Data
+
+```{r}
+ovarianData <- readRDS(
+  "/Users/derekyao/Documents/BDSI/Cancer Data Science/Data/ovarianData.RDS"
+)
+lungData <- readRDS(
+  "/Users/derekyao/Documents/BDSI/Cancer Data Science/Data/lungData.RDS"
+)
+```
+
+Visualize the proportion of tumor cells in each image stratified by patient
+```{r}
+ggplot(
+  lungData$lung_cells %>% group_by(
+    slide_id, image_id
+  ) %>% 
+    dplyr::summarize(Proportion = sum(pheno == "CK", na.rm = T)/n()) ,
+  aes(x = fct_reorder(slide_id, Proportion, .desc = T), y = Proportion)
+) + 
+  geom_boxplot() +
+  geom_boxplot(inherit.aes = F, aes(y = Proportion), col = "red") +
+  theme(axis.text.x = element_blank(), axis.ticks = element_blank()) +
+  labs(x = "Slide ID", title = "Proportion of Tumor Cells by Patient")
+
+## the red line shows the distribution of the entire data set
+
+ggplot(
+  lungData$lung_cells %>% group_by(
+    slide_id, pheno
+  ) %>% 
+    dplyr::summarize(total = n()) %>% 
+    group_by(slide_id) %>% 
+    mutate(Proportion = total / sum(total)),
+  aes(y = Proportion, x = pheno)
+) + geom_boxplot() +
+  labs(x = "Phenotype")
+
+ggplot(
+  ovarianData$ovarian_cells %>% group_by(
+    sample_id, pheno
+  ) %>% 
+    dplyr::summarize(total = n()) %>% 
+    group_by(sample_id) %>% 
+    mutate(Proportion = total / sum(total)),
+  aes(y = Proportion, x = pheno)
+) + geom_boxplot() +
+  labs(x = "Phenotype")
+  
+```
+
+Visualize the proportion of cells of each type, stratified by stage at imaging
+
+```{r}
+ggplot(
+  lungData$lung_cells %>% group_by(
+    slide_id, pheno
+  ) %>% dplyr::summarize(
+    total = n()
+  ) %>% group_by(
+    slide_id
+  ) %>% 
+    mutate(
+      prop = total/sum(total)
+    ) %>% left_join(
+      lungData$lung_metadata[ , c("slide_id" , "stage_at_diagnosis")], by = "slide_id"
+    ), aes(col = stage_at_diagnosis , y = prop, x = pheno)
+) +
+  geom_boxplot() +
+  labs(x = "Phenotype", y = "Patient Prevalence", col = "Stage", title = "Visualizing Patient-Level Prevalence")
+```
+
+## Exploratory Analyses
+
+```{r, results=FALSE}
+propMetadata_lung <- left_join(
+  lungData$lung_metadata,
+  lungData$lung_cells %>% group_by(
+    slide_id, pheno
+  ) %>% dplyr::summarize(
+    total = n()
+  ) %>% group_by(
+    slide_id
+  ) %>% 
+    mutate(
+      prop = total/sum(total)
+    ) %>% dplyr::ungroup() %>% dplyr::select(slide_id, pheno, prop) %>% 
+  as.data.frame() %>% reshape(
+      direction = "wide", timevar = "pheno", idvar = "slide_id"
+    ), by = "slide_id"
+)
+
+rowSums(
+  propMetadata_lung[
+     , c("prop.CD14", "prop.CD19", "prop.CD4", "prop.CD8", "prop.CK", "prop.Other", "prop.NA")
+  ]
+)
+
+propMetadata_lung[
+   , c("prop.CD14", "prop.CD19", "prop.CD4", "prop.CD8", "prop.CK", "prop.Other", "prop.NA")
+][is.na(
+  propMetadata_lung[
+     , c("prop.CD14", "prop.CD19", "prop.CD4", "prop.CD8", "prop.CK", "prop.Other", "prop.NA")
+  ]
+)] <- 0 # zeros occur because a phenotype is not present
+# if not present, prevalence should be zero
+rowSums(
+  propMetadata_lung[
+     , c("prop.CD14", "prop.CD19", "prop.CD4", "prop.CD8", "prop.CK", "prop.Other", "prop.NA")
+  ]
+)
+# now prevalences add to 1
+
+propMetadata_ovarian <- left_join(
+  ovarianData$ovarian_metadata,
+  ovarianData$ovarian_cells %>% group_by(
+    sample_id, pheno
+  ) %>% dplyr::summarize(
+    total = n()
+  ) %>% group_by(
+    sample_id
+  ) %>% 
+    mutate(
+      prop = total/sum(total)
+    ) %>% dplyr::ungroup() %>% dplyr::select(sample_id, pheno, prop) %>% 
+  as.data.frame() %>% reshape(
+      direction = "wide", timevar = "pheno", idvar = "sample_id"
+    ), by = "sample_id"
+)
+
+rowSums(
+  propMetadata_ovarian[
+     , c("prop.B Cell", "prop.Cytotoxic T", "prop.Macrophage", "prop.Other", "prop.Tumor", "prop.T Helper")
+  ]
+)
+
+propMetadata_ovarian[
+     , c("prop.B Cell", "prop.Cytotoxic T", "prop.Macrophage", "prop.Other", "prop.Tumor", "prop.T Helper")
+  ][is.na(
+  propMetadata_ovarian[
+     , c("prop.B Cell", "prop.Cytotoxic T", "prop.Macrophage", "prop.Other", "prop.Tumor", "prop.T Helper")
+  ]
+)] <- 0 # zeros occur because a phenotype is not present
+# if not present, prevalence should be zero
+rowSums(
+  propMetadata_ovarian[
+     , c("prop.B Cell", "prop.Cytotoxic T", "prop.Macrophage", "prop.Other", "prop.Tumor", "prop.T Helper")
+  ]
+)
+# now prevalences add to 1
+```
+
+```{r}
+cor(
+  propMetadata_lung$survival_days,
+  propMetadata_lung[
+     , c("prop.CD14", "prop.CD19", "prop.CD4", "prop.CD8", "prop.CK", "prop.Other", "prop.NA")
+  ]
+)
+cor(
+  propMetadata_ovarian$survival_time,
+  propMetadata_ovarian[
+     , c("prop.B Cell", "prop.Cytotoxic T", "prop.Macrophage", "prop.Other", "prop.Tumor", "prop.T Helper")
+  ]
+)
+
+propMetadata_lung$survLong <- ifelse(
+  propMetadata_lung$survival_days > median(propMetadata_lung$survival_days), 1, 0
+)
+propMetadata_ovarian$survLong <- ifelse(
+  propMetadata_ovarian$survival_time > median(propMetadata_ovarian$survival_time), 1, 0
+)
+
+ggplot(
+  propMetadata_lung %>% reshape2::melt(
+    id.vars = c("slide_id", "survLong"), 
+    measure.vars = c(
+      "prop.CD14", "prop.CD19", "prop.CD4", "prop.CD8", "prop.CK", "prop.Other", "prop.NA"
+    )
+  ), aes(x = variable, y = value, col = as.factor(survLong))
+) + geom_boxplot()
+ggplot(
+  propMetadata_ovarian %>% reshape2::melt(
+    id.vars = c("sample_id", "survLong"), 
+    measure.vars = c(
+      "prop.B Cell", "prop.Cytotoxic T", "prop.Macrophage", "prop.Other", "prop.Tumor", "prop.T Helper"
+    )
+  ), aes(x = variable, y = value, col = as.factor(survLong))
+) + geom_boxplot()
+```
+It looks like there could be a slight negative association between tumor cells
+and median survival in the lung dataset. In the ovarian dataset, there is no 
+association between survival and tumor cell prevalence. However, T Helper cell
+prevalence may be associated with survival.
